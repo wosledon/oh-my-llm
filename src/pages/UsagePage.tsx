@@ -11,6 +11,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 
 interface DailyUsage {
@@ -50,7 +51,7 @@ export default function UsagePage() {
   const fetchUsage = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await (window as any).__TAURI_INVOKE__('get_usage', {
+      const result = await invoke<{ daily: DailyUsage[]; summary: UsageSummary }>('get_usage', {
         params: {
           start_date: startDate,
           end_date: endDate,
@@ -71,7 +72,7 @@ export default function UsagePage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Card variant="outlined">
+      <Card variant="outlined" sx={{ borderRadius: 2 }}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>{t.usage.title}</Typography>
 
@@ -121,25 +122,25 @@ export default function UsagePage() {
               mb: 3,
             }}
           >
-            <Card variant="outlined">
+            <Card variant="outlined" sx={{ borderRadius: 2 }}>
               <CardContent>
                 <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{summary.total_requests}</Typography>
                 <Typography variant="caption" color="text.secondary">{t.usage.totalRequests}</Typography>
               </CardContent>
             </Card>
-            <Card variant="outlined">
+            <Card variant="outlined" sx={{ borderRadius: 2 }}>
               <CardContent>
                 <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{summary.total_prompt_tokens.toLocaleString()}</Typography>
                 <Typography variant="caption" color="text.secondary">{t.usage.totalPromptTokens}</Typography>
               </CardContent>
             </Card>
-            <Card variant="outlined">
+            <Card variant="outlined" sx={{ borderRadius: 2 }}>
               <CardContent>
                 <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{summary.total_completion_tokens.toLocaleString()}</Typography>
                 <Typography variant="caption" color="text.secondary">{t.usage.totalCompletionTokens}</Typography>
               </CardContent>
             </Card>
-            <Card variant="outlined">
+            <Card variant="outlined" sx={{ borderRadius: 2 }}>
               <CardContent>
                 <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>${summary.total_cost.toFixed(4)}</Typography>
                 <Typography variant="caption" color="text.secondary">{t.usage.totalCost}</Typography>

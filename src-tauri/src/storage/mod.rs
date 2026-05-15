@@ -62,4 +62,6 @@ pub struct ProxyConfig {
     pub budget_warning: f64,
     pub max_retries: i32,
     pub timeout_secs: i32,
+    pub shadow_model_name: String,
+    pub shadow_mapping_id: Option<String>,
 }

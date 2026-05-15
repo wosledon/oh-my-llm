@@ -24,10 +24,16 @@ export interface Translation {
     models: string;
     recentRequests: string;
     noData: string;
+    proxyAddress: string;
+    copyAddress: string;
+    copied: string;
+    shadowModel: string;
+    shadowModelSwitch: string;
   };
   providers: {
     title: string;
     addProvider: string;
+    editProvider: string;
     name: string;
     type: string;
     baseUrl: string;
@@ -37,6 +43,7 @@ export interface Translation {
     save: string;
     cancel: string;
     delete: string;
+    edit: string;
     placeholderName: string;
     placeholderUrl: string;
     placeholderHeaders: string;
@@ -44,6 +51,7 @@ export interface Translation {
   models: {
     title: string;
     addModel: string;
+    editModel: string;
     provider: string;
     exposedName: string;
     upstreamName: string;
@@ -54,6 +62,7 @@ export interface Translation {
     save: string;
     cancel: string;
     delete: string;
+    edit: string;
     placeholderExposed: string;
     placeholderUpstream: string;
   };
@@ -67,6 +76,8 @@ export interface Translation {
     logRetentionDays: string;
     maxRetries: string;
     timeoutSecs: string;
+    shadowModelName: string;
+    shadowModelDesc: string;
     language: string;
     zh: string;
     en: string;
@@ -142,10 +153,16 @@ export const zh: Translation = {
     models: '模型',
     recentRequests: '最近请求',
     noData: '暂无数据',
+    proxyAddress: '代理地址',
+    copyAddress: '复制地址',
+    copied: '已复制',
+    shadowModel: '影子模型',
+    shadowModelSwitch: '影子模型开关',
   },
   providers: {
     title: '供应商',
     addProvider: '添加供应商',
+    editProvider: '编辑供应商',
     name: '名称',
     type: '类型',
     baseUrl: 'Base URL',
@@ -155,6 +172,7 @@ export const zh: Translation = {
     save: '保存',
     cancel: '取消',
     delete: '删除',
+    edit: '编辑',
     placeholderName: 'DeepSeek',
     placeholderUrl: 'https://api.example.com/v1',
     placeholderHeaders: '{"X-Custom": "value"}',
@@ -162,6 +180,7 @@ export const zh: Translation = {
   models: {
     title: '模型映射',
     addModel: '添加模型',
+    editModel: '编辑模型',
     provider: '供应商',
     exposedName: '暴露名称',
     upstreamName: '上游名称',
@@ -172,6 +191,7 @@ export const zh: Translation = {
     save: '保存',
     cancel: '取消',
     delete: '删除',
+    edit: '编辑',
     placeholderExposed: 'gpt-4',
     placeholderUpstream: 'gpt-4-0613',
   },
@@ -185,6 +205,8 @@ export const zh: Translation = {
     logRetentionDays: '日志保留天数',
     maxRetries: '最大重试次数',
     timeoutSecs: '超时时间 (秒)',
+    shadowModelName: '影子模型名称',
+    shadowModelDesc: '用作 /v1/models 返回的统一模型名（映射到 shadow_mapping_id 对应的模型）',
     language: '界面语言',
     zh: '中文',
     en: 'English',

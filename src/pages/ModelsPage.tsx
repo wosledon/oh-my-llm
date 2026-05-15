@@ -24,17 +24,19 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useModelStore } from '../stores/modelStore';
 import { useProviderStore } from '../stores/providerStore';
 import { useI18n } from '../i18n';
-import type { ModelInput } from '../types';
+import type { ModelMapping, ModelInput } from '../types';
 
 export default function ModelsPage() {
   const { t } = useI18n();
-  const { models, loading, error, fetchModels, addModel, deleteModel } = useModelStore();
+  const { models, loading, error, fetchModels, addModel, updateModel, deleteModel } = useModelStore();
   const { providers, fetchProviders } = useProviderStore();
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ModelInput>({
     provider_id: '',
     exposed_name: '',
@@ -49,17 +51,44 @@ export default function ModelsPage() {
     fetchProviders();
   }, [fetchModels, fetchProviders]);
 
-  const handleSubmit = async () => {
-    await addModel(form);
-    setOpen(false);
+  const resetForm = () => {
     setForm({ provider_id: '', exposed_name: '', upstream_name: '', enabled: true, input_price: 0, output_price: 0 });
+    setEditingId(null);
+  };
+
+  const handleOpenAdd = () => {
+    resetForm();
+    setOpen(true);
+  };
+
+  const handleOpenEdit = (m: ModelMapping) => {
+    setForm({
+      provider_id: m.provider_id,
+      exposed_name: m.exposed_name,
+      upstream_name: m.upstream_name,
+      enabled: m.enabled,
+      input_price: m.input_price,
+      output_price: m.output_price,
+    });
+    setEditingId(m.id);
+    setOpen(true);
+  };
+
+  const handleSubmit = async () => {
+    if (editingId) {
+      await updateModel(editingId, form);
+    } else {
+      await addModel(form);
+    }
+    setOpen(false);
+    resetForm();
   };
 
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" sx={{ fontWeight: 600 }}>{t.models.title}</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd}>
           {t.models.addModel}
         </Button>
       </Box>
@@ -69,8 +98,8 @@ export default function ModelsPage() {
         <Alert severity="error" sx={{ mb: 2 }}>{t.common.error}: {error}</Alert>
       )}
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{t.models.addModel}</DialogTitle>
+      <Dialog open={open} onClose={() => { setOpen(false); resetForm(); }} maxWidth="sm" fullWidth>
+        <DialogTitle>{editingId ? t.models.editModel : t.models.addModel}</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
           <FormControl fullWidth>
             <InputLabel>{t.models.provider}</InputLabel>
@@ -123,12 +152,12 @@ export default function ModelsPage() {
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpen(false)}>{t.models.cancel}</Button>
+          <Button onClick={() => { setOpen(false); resetForm(); }}>{t.models.cancel}</Button>
           <Button variant="contained" onClick={handleSubmit}>{t.models.save}</Button>
         </DialogActions>
       </Dialog>
 
-      <Card variant="outlined">
+      <Card variant="outlined" sx={{ borderRadius: 2 }}>
         <Table>
           <TableHead>
             <TableRow>
@@ -153,6 +182,9 @@ export default function ModelsPage() {
                 <TableCell>{m.input_price}</TableCell>
                 <TableCell>{m.output_price}</TableCell>
                 <TableCell align="right">
+                  <IconButton size="small" color="primary" onClick={() => handleOpenEdit(m)}>
+                    <EditIcon fontSize="small" />
+                  </IconButton>
                   <IconButton size="small" color="error" onClick={() => deleteModel(m.id)}>
                     <DeleteIcon fontSize="small" />
                   </IconButton>

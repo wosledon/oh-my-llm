@@ -42,6 +42,8 @@ export interface ProxyConfig {
   openai_enabled: boolean;
   anthropic_enabled: boolean;
   default_model?: string;
+  shadow_model_name: string;
+  shadow_mapping_id?: string | null;
   auto_start: boolean;
   log_requests: boolean;
   log_retention_days: number;

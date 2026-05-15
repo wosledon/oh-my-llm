@@ -38,13 +38,22 @@ export default function SettingsPage() {
 
       <Box sx={{ mb: 3 }}>
         <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>{t.settings.title}</Typography>
-        <Card variant="outlined" sx={{ maxWidth: 560 }}>
+        <Card variant="outlined" sx={{ maxWidth: 560, borderRadius: 2 }}>
           <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
               label={t.settings.port}
               type="number"
               value={config.port}
               onChange={(e) => updateConfig({ ...config, port: parseInt(e.target.value) || 11888 })}
+              fullWidth
+            />
+
+            <TextField
+              label={t.settings.shadowModelName}
+              value={config.shadow_model_name || ''}
+              onChange={(e) => updateConfig({ ...config, shadow_model_name: e.target.value })}
+              placeholder="gpt-4"
+              helperText={t.settings.shadowModelDesc}
               fullWidth
             />
 
@@ -117,7 +126,7 @@ export default function SettingsPage() {
 
       <Box>
         <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>{t.settings.language}</Typography>
-        <Card variant="outlined" sx={{ maxWidth: 560 }}>
+        <Card variant="outlined" sx={{ maxWidth: 560, borderRadius: 2 }}>
           <CardContent>
             <FormControl fullWidth>
               <InputLabel>{t.settings.language}</InputLabel>

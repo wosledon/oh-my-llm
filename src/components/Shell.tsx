@@ -14,7 +14,7 @@ import ViewInArIcon from '@mui/icons-material/ViewInAr';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HistoryIcon from '@mui/icons-material/History';
 import BarChartIcon from '@mui/icons-material/BarChart';
-import CircleIcon from '@mui/icons-material/Circle';
+import HubIcon from '@mui/icons-material/Hub';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useI18n } from '../i18n';
 
@@ -51,15 +51,15 @@ export default function Shell() {
         }}
       >
         <Toolbar sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 2 }}>
-          <CircleIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+          <HubIcon sx={{ color: 'primary.main', fontSize: 24 }} />
           <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
             {t.app.name}
           </Typography>
         </Toolbar>
         <Divider />
-        <List sx={{ px: 1 }}>
+        <List sx={{ px: 1.5, py: 1 }}>
           <ListItem sx={{ py: 0.5 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ px: 1, fontWeight: 500 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ px: 1, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.5 }}>
               {t.app.platform}
             </Typography>
           </ListItem>
@@ -68,12 +68,20 @@ export default function Shell() {
               <ListItemButton
                 selected={location.pathname === item.value}
                 onClick={() => navigate(item.value)}
-                sx={{ borderRadius: 1 }}
+                sx={{ borderRadius: 1.5 }}
               >
                 <ListItemIcon sx={{ minWidth: 36 }}>
                   <item.icon fontSize="small" />
                 </ListItemIcon>
-                <ListItemText primary={item.label} />
+                <ListItemText
+                  primary={item.label}
+                  sx={{
+                    '& .MuiListItemText-primary': {
+                      fontSize: 14,
+                      fontWeight: location.pathname === item.value ? 600 : 400,
+                    },
+                  }}
+                />
               </ListItemButton>
             </ListItem>
           ))}

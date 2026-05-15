@@ -42,9 +42,9 @@ pub async fn route_request(State(state): State<ProxyState>, req: Request<Body>) 
 
 pub fn resolve_model_route(db: &Connection, exposed_name: &str) -> Result<ProviderContext, String> {
     let mut stmt = db.prepare(
-        "SELECT m.provider_id, m.upstream_name, p.name, p.prov_type, p.base_url, p.api_key, p.extra_headers, p.created_at, p.updated_at 
-         FROM model_mappings m 
-         JOIN providers p ON m.provider_id = p.id 
+        "SELECT m.provider_id, m.upstream_name, p.name, p.prov_type, p.base_url, p.api_key, p.extra_headers, p.created_at, p.updated_at
+         FROM model_mappings m
+         JOIN providers p ON m.provider_id = p.id
          WHERE m.exposed_name = ?1 AND m.enabled = 1"
     ).map_err(|e| format!("DB prepare error: {}", e))?;
 
@@ -75,6 +75,46 @@ pub fn resolve_model_route(db: &Connection, exposed_name: &str) -> Result<Provid
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => {
             Err(format!("Model '{}' not found or not enabled", exposed_name))
+        }
+        Err(e) => Err(format!("Database error: {}", e)),
+    }
+}
+
+pub fn resolve_shadow_route(db: &Connection, mapping_id: &str) -> Result<ProviderContext, String> {
+    let mut stmt = db.prepare(
+        "SELECT m.provider_id, m.upstream_name, p.name, p.prov_type, p.base_url, p.api_key, p.extra_headers, p.created_at, p.updated_at
+         FROM model_mappings m
+         JOIN providers p ON m.provider_id = p.id
+         WHERE m.id = ?1 AND m.enabled = 1"
+    ).map_err(|e| format!("DB prepare error: {}", e))?;
+
+    let row = stmt.query_row([mapping_id], |row| {
+        let api_key_encrypted: Vec<u8> = row.get(5)?;
+        let api_key = crate::crypto::decrypt(&api_key_encrypted).unwrap_or_default();
+        let provider = Provider {
+            id: row.get(0)?,
+            name: row.get(2)?,
+            prov_type: row.get(3)?,
+            base_url: row.get(4)?,
+            api_key,
+            extra_headers: row.get(6)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+        };
+        let upstream_name: String = row.get(1)?;
+        Ok((provider, upstream_name))
+    });
+
+    match row {
+        Ok((provider, upstream_model)) => {
+            let ctx = ProviderContext {
+                provider,
+                upstream_model,
+            };
+            Ok(ctx)
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            Err(format!("Shadow model mapping '{}' not found or not enabled", mapping_id))
         }
         Err(e) => Err(format!("Database error: {}", e)),
     }

@@ -27,6 +27,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 
 interface LogItem {
@@ -62,7 +63,7 @@ export default function LogsPage() {
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await (window as any).__TAURI_INVOKE__('query_logs', {
+      const result = await invoke<LogItem[]>('query_logs', {
         params: {
           search: search || null,
           status: statusFilter === 'all' ? null : statusFilter,
@@ -87,7 +88,7 @@ export default function LogsPage() {
     setDetailOpen(true);
     setDetailBody({ request: '', response: '' });
     try {
-      const detail = await (window as any).__TAURI_INVOKE__('get_log_detail', {
+      const detail = await invoke<{ request_body: string; response_body: string }>('get_log_detail', {
         logId: log.id,
       });
       if (detail) {
@@ -107,7 +108,7 @@ export default function LogsPage() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Card variant="outlined">
+      <Card variant="outlined" sx={{ borderRadius: 2 }}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>{t.logs.title}</Typography>
 

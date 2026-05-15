@@ -22,17 +22,19 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useProviderStore } from '../stores/providerStore';
 import { useI18n } from '../i18n';
-import type { ProviderInput } from '../types';
+import type { Provider, ProviderInput } from '../types';
 
 const PROV_TYPES = ['openai', 'anthropic', 'openai_compatible'];
 
 export default function ProvidersPage() {
   const { t } = useI18n();
-  const { providers, loading, error, fetchProviders, addProvider, deleteProvider } = useProviderStore();
+  const { providers, loading, error, fetchProviders, addProvider, updateProvider, deleteProvider } = useProviderStore();
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ProviderInput>({
     name: '',
     prov_type: 'openai',
@@ -45,17 +47,43 @@ export default function ProvidersPage() {
     fetchProviders();
   }, [fetchProviders]);
 
-  const handleSubmit = async () => {
-    await addProvider(form);
-    setOpen(false);
+  const resetForm = () => {
     setForm({ name: '', prov_type: 'openai', base_url: '', api_key: '', extra_headers: '' });
+    setEditingId(null);
+  };
+
+  const handleOpenAdd = () => {
+    resetForm();
+    setOpen(true);
+  };
+
+  const handleOpenEdit = (p: Provider) => {
+    setForm({
+      name: p.name,
+      prov_type: p.prov_type,
+      base_url: p.base_url,
+      api_key: p.api_key,
+      extra_headers: p.extra_headers || '',
+    });
+    setEditingId(p.id);
+    setOpen(true);
+  };
+
+  const handleSubmit = async () => {
+    if (editingId) {
+      await updateProvider(editingId, form);
+    } else {
+      await addProvider(form);
+    }
+    setOpen(false);
+    resetForm();
   };
 
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" sx={{ fontWeight: 600 }}>{t.providers.title}</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd}>
           {t.providers.addProvider}
         </Button>
       </Box>
@@ -66,7 +94,7 @@ export default function ProvidersPage() {
       )}
 
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{t.providers.addProvider}</DialogTitle>
+        <DialogTitle>{editingId ? t.providers.editProvider : t.providers.addProvider}</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
           <TextField
             label={t.providers.name}
@@ -110,12 +138,12 @@ export default function ProvidersPage() {
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpen(false)}>{t.providers.cancel}</Button>
+          <Button onClick={() => { setOpen(false); resetForm(); }}>{t.providers.cancel}</Button>
           <Button variant="contained" onClick={handleSubmit}>{t.providers.save}</Button>
         </DialogActions>
       </Dialog>
 
-      <Card variant="outlined">
+      <Card variant="outlined" sx={{ borderRadius: 2 }}>
         <Table>
           <TableHead>
             <TableRow>
@@ -136,6 +164,9 @@ export default function ProvidersPage() {
                 <TableCell sx={{ fontFamily: 'monospace', fontSize: '12px' }}>{p.base_url}</TableCell>
                 <TableCell sx={{ fontFamily: 'monospace' }}>{p.api_key}</TableCell>
                 <TableCell align="right">
+                  <IconButton size="small" color="primary" onClick={() => handleOpenEdit(p)}>
+                    <EditIcon fontSize="small" />
+                  </IconButton>
                   <IconButton size="small" color="error" onClick={() => deleteProvider(p.id)}>
                     <DeleteIcon fontSize="small" />
                   </IconButton>

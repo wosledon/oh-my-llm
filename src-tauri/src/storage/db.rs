@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
-const CURRENT_SCHEMA_VERSION: i32 = 1;
+const CURRENT_SCHEMA_VERSION: i32 = 2;
 
 pub fn get_db_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app_handle
@@ -40,12 +40,16 @@ fn run_migrations(conn: &mut Connection) -> Result<(), String> {
 
     if version < 1 {
         migration_v1(conn)?;
-        conn.execute(
-            "INSERT OR REPLACE INTO schema_version (version) VALUES (?1)",
-            [CURRENT_SCHEMA_VERSION],
-        )
-        .map_err(|e| format!("Failed to update schema version: {}", e))?;
     }
+    if version < 2 {
+        migration_v2(conn)?;
+    }
+
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_version (version) VALUES (?1)",
+        [CURRENT_SCHEMA_VERSION],
+    )
+    .map_err(|e| format!("Failed to update schema version: {}", e))?;
 
     Ok(())
 }
@@ -168,5 +172,34 @@ fn migration_v1(conn: &mut Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("Migration v1 failed: {}", e))?;
 
+    Ok(())
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    let count: i32 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+            rusqlite::params![table, column],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("Failed to check column existence: {}", e))?;
+    Ok(count > 0)
+}
+
+fn migration_v2(conn: &mut Connection) -> Result<(), String> {
+    if !column_exists(conn, "proxy_config", "shadow_model_name")? {
+        conn.execute(
+            "ALTER TABLE proxy_config ADD COLUMN shadow_model_name TEXT NOT NULL DEFAULT 'oh-my-llm'",
+            [],
+        )
+        .map_err(|e| format!("Migration v2 failed adding shadow_model_name: {}", e))?;
+    }
+    if !column_exists(conn, "proxy_config", "shadow_mapping_id")? {
+        conn.execute(
+            "ALTER TABLE proxy_config ADD COLUMN shadow_mapping_id TEXT",
+            [],
+        )
+        .map_err(|e| format!("Migration v2 failed adding shadow_mapping_id: {}", e))?;
+    }
     Ok(())
 }
