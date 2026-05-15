@@ -71,6 +71,12 @@ pub async fn handle_chat_completions(
     let upstream_model = ctx.upstream_model.clone();
     let log_requests = config.log_requests;
 
+    // Query model prices before dropping db guard
+    let models = crate::storage::model_repo::list_models(&db_guard, Some(&provider_id)).unwrap_or_default();
+    let model_info = models.iter().find(|m| m.upstream_name == upstream_model);
+    let input_price = model_info.map(|m| m.input_price).unwrap_or(2.0);
+    let output_price = model_info.map(|m| m.output_price).unwrap_or(6.0);
+
     let client = match select_client(&state, &prov_type) {
         Ok(c) => c,
         Err(e) => {
@@ -130,7 +136,7 @@ pub async fn handle_chat_completions(
                 };
                 let response_body_str = String::from_utf8_lossy(&body_bytes).to_string();
                 let (prompt_tokens, completion_tokens, cost) =
-                    extract_usage(&response_body_str, &provider_id, upstream_model.clone());
+                    extract_usage(&response_body_str, input_price, output_price);
 
                 let _ = log_request(
                     &state,
@@ -197,7 +203,7 @@ fn get_token(val: &serde_json::Value, keys: &[&str]) -> i64 {
     0
 }
 
-fn extract_usage(response_body: &str, _provider_id: &str, _upstream_model: String) -> (i64, i64, f64) {
+fn extract_usage(response_body: &str, input_price: f64, output_price: f64) -> (i64, i64, f64) {
     let val = match serde_json::from_str::<serde_json::Value>(response_body) {
         Ok(v) => v,
         Err(_) => return (0, 0, 0.0),
@@ -218,8 +224,8 @@ fn extract_usage(response_body: &str, _provider_id: &str, _upstream_model: Strin
         (prompt, completion)
     };
 
-    // Simple cost estimation: assume $2 / 1M tokens for input, $6 / 1M for output if no price config
-    let cost = (prompt as f64 * 2.0 + completion as f64 * 6.0) / 1_000_000.0;
+    // Cost estimation using configured model prices (USD per 1M tokens)
+    let cost = (prompt as f64 * input_price + completion as f64 * output_price) / 1_000_000.0;
     (prompt, completion, cost)
 }
 

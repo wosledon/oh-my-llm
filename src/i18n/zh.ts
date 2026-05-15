@@ -34,6 +34,13 @@ export interface Translation {
     inactive: string;
     enabledCount: string;
     shadowModelSelectLabel: string;
+    quickConfig: string;
+    protocolConfig: string;
+    shadowModelConfig: string;
+    openai: string;
+    anthropic: string;
+    providerCount: string;
+    modelCount: string;
   };
   providers: {
     title: string;
@@ -138,7 +145,7 @@ export const zh: Translation = {
     platform: '平台',
   },
   nav: {
-    dashboard: '概览',
+    dashboard: '工作台',
     usage: '用量',
     providers: '供应商',
     models: '模型',
@@ -146,7 +153,7 @@ export const zh: Translation = {
     logs: '日志',
   },
   dashboard: {
-    title: '概览',
+    title: '工作台',
     proxyStatus: '代理状态',
     running: '运行中',
     stopped: '已停止',
@@ -162,12 +169,19 @@ export const zh: Translation = {
     copyAddress: '复制地址',
     copied: '已复制',
     shadowModel: '影子模型',
-    shadowModelSwitch: '影子模型开关',
+    shadowModelSwitch: '启用影子模型',
     protocols: '协议',
     active: '已启用',
     inactive: '未启用',
     enabledCount: '个已启用',
     shadowModelSelectLabel: '映射模型',
+    quickConfig: '快捷配置',
+    protocolConfig: '协议与端口',
+    shadowModelConfig: '影子模型配置',
+    openai: 'OpenAI',
+    anthropic: 'Anthropic',
+    providerCount: '供应商',
+    modelCount: '模型',
   },
   providers: {
     title: '供应商',

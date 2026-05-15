@@ -54,6 +54,7 @@ export default function LogsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [offset, setOffset] = useState(0);
+  const [searchDebounce, setSearchDebounce] = useState('');
   const [selectedLog, setSelectedLog] = useState<LogItem | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailTab, setDetailTab] = useState(0);
@@ -66,7 +67,7 @@ export default function LogsPage() {
     try {
       const result = await invoke<LogItem[]>('query_logs', {
         params: {
-          search: search || null,
+          search: searchDebounce || null,
           status: statusFilter === 'all' ? null : statusFilter,
           limit,
           offset,
@@ -78,11 +79,19 @@ export default function LogsPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, offset]);
+  }, [searchDebounce, statusFilter, offset]);
 
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchDebounce(search);
+      setOffset(0);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const handleOpenDetail = async (log: LogItem) => {
     setSelectedLog(log);
@@ -132,15 +141,26 @@ export default function LogsPage() {
                 value={statusFilter}
                 label={t.logs.filter}
                 onChange={(e) => { setStatusFilter(e.target.value); setOffset(0); }}
+                MenuProps={{
+                  slotProps: {
+                    paper: {
+                      sx: {
+                        mt: 0.5,
+                        borderRadius: 2,
+                        boxShadow: (theme: any) => theme.shadows[8],
+                      },
+                    },
+                  },
+                }}
               >
                 <MenuItem value="all">{t.logs.all}</MenuItem>
                 <MenuItem value="success">{t.logs.success}</MenuItem>
                 <MenuItem value="error">{t.logs.error}</MenuItem>
               </Select>
             </FormControl>
-            <Button variant="contained" size="small" startIcon={<FilterListIcon />} onClick={() => { setOffset(0); fetchLogs(); }}>
-              {t.logs.filter}
-            </Button>
+            <IconButton size="small" sx={{ ml: 0.5 }} onClick={() => { setOffset(0); fetchLogs(); }} title={t.common.confirm}>
+              <FilterListIcon fontSize="small" />
+            </IconButton>
           </Box>
 
           {loading ? (

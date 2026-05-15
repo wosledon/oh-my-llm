@@ -109,6 +109,17 @@ export default function ProvidersPage() {
               value={form.prov_type}
               label={t.providers.type}
               onChange={(e) => setForm({ ...form, prov_type: e.target.value })}
+              MenuProps={{
+                slotProps: {
+                  paper: {
+                    sx: {
+                      mt: 0.5,
+                      borderRadius: 2,
+                      boxShadow: (theme: any) => theme.shadows[8],
+                    },
+                  },
+                },
+              }}
             >
               {PROV_TYPES.map((pt) => (
                 <MenuItem key={pt} value={pt}>{pt}</MenuItem>

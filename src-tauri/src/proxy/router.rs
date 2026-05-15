@@ -34,6 +34,9 @@ pub async fn route_request(State(state): State<ProxyState>, req: Request<Body>) 
         "/v1/chat/completions" => {
             crate::proxy::handlers::openai::handle_chat_completions(State(state), req).await
         }
+        "/v1/messages" => {
+            crate::proxy::handlers::anthropic::handle_anthropic_messages(State(state), req).await
+        }
         "/v1/models" => crate::proxy::handlers::models::handle_list_models(State(state)).await,
         "/health" => axum::response::Json(serde_json::json!({"status": "ok"})).into_response(),
         _ => (StatusCode::NOT_FOUND, "Not Found").into_response(),

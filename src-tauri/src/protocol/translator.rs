@@ -78,6 +78,96 @@ pub fn anthropic_to_openai(resp: AnthropicResponse) -> ChatCompletionResponse {
     }
 }
 
+/// Convert Anthropic messages request to OpenAI chat completion request
+pub fn anthropic_to_openai_request(req: AnthropicRequest) -> ChatCompletionRequest {
+    let mut messages: Vec<crate::protocol::openai_types::ChatMessage> = Vec::new();
+
+    if let Some(system) = req.system {
+        messages.push(crate::protocol::openai_types::ChatMessage {
+            role: "system".to_string(),
+            name: None,
+            content: Some(crate::protocol::openai_types::ChatContent::Text(system)),
+            tool_calls: None,
+            tool_call_id: None,
+        });
+    }
+
+    for msg in req.messages {
+        messages.push(crate::protocol::openai_types::ChatMessage {
+            role: msg.role,
+            name: None,
+            content: Some(crate::protocol::openai_types::ChatContent::Text(msg.content)),
+            tool_calls: None,
+            tool_call_id: None,
+        });
+    }
+
+    ChatCompletionRequest {
+        model: req.model,
+        messages,
+        temperature: req.temperature,
+        top_p: req.top_p,
+        n: None,
+        stream: req.stream,
+        stop: req.stop_sequences,
+        max_tokens: Some(req.max_tokens),
+        max_completion_tokens: None,
+        presence_penalty: None,
+        frequency_penalty: None,
+        logit_bias: None,
+        user: None,
+        tools: None,
+        tool_choice: None,
+        response_format: None,
+    }
+}
+
+/// Convert OpenAI chat completion response to Anthropic response
+pub fn openai_to_anthropic_response(resp: ChatCompletionResponse) -> AnthropicResponse {
+    let choice = resp.choices.into_iter().next().unwrap_or(Choice {
+        index: 0,
+        message: crate::protocol::openai_types::ChatMessage {
+            role: "assistant".to_string(),
+            name: None,
+            content: Some(crate::protocol::openai_types::ChatContent::Text("".to_string())),
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        logprobs: None,
+        finish_reason: None,
+    });
+
+    let text_content = extract_text(&choice.message.content).unwrap_or_default();
+
+    let content = if text_content.is_empty() {
+        vec![]
+    } else {
+        vec![crate::protocol::anthropic_types::AnthropicContent::Text {
+            text: text_content,
+        }]
+    };
+
+    let usage = resp.usage.unwrap_or(Usage {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+    });
+
+    AnthropicResponse {
+        id: resp.id,
+        response_type: "message".to_string(),
+        role: "assistant".to_string(),
+        content,
+        model: resp.model,
+        stop_reason: choice.finish_reason,
+        stop_sequence: None,
+        usage: crate::protocol::anthropic_types::AnthropicUsage {
+            input_tokens: usage.prompt_tokens,
+            output_tokens: usage.completion_tokens,
+        },
+    }
+}
+
 fn extract_text(content: &Option<crate::protocol::openai_types::ChatContent>) -> Option<String> {
     match content {
         Some(crate::protocol::openai_types::ChatContent::Text(t)) => Some(t.clone()),

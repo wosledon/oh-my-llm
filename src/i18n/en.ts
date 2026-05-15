@@ -6,7 +6,7 @@ export const en: Translation = {
     platform: 'Platform',
   },
   nav: {
-    dashboard: 'Dashboard',
+    dashboard: 'Workbench',
     usage: 'Usage',
     providers: 'Providers',
     models: 'Models',
@@ -36,6 +36,13 @@ export const en: Translation = {
     inactive: 'Inactive',
     enabledCount: 'enabled',
     shadowModelSelectLabel: 'Map to Model',
+    quickConfig: 'Quick Config',
+    protocolConfig: 'Protocol & Port',
+    shadowModelConfig: 'Shadow Model',
+    openai: 'OpenAI',
+    anthropic: 'Anthropic',
+    providerCount: 'Providers',
+    modelCount: 'Models',
   },
   providers: {
     title: 'Providers',

@@ -36,6 +36,7 @@ impl ProxyServer {
 
         let app = Router::new()
             .route("/v1/chat/completions", post(route_request))
+            .route("/v1/messages", post(route_request))
             .route("/v1/models", get(route_request))
             .route("/health", get(route_request))
             .layer(cors)

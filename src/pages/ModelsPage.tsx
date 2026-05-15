@@ -107,6 +107,17 @@ export default function ModelsPage() {
               value={form.provider_id}
               label={t.models.provider}
               onChange={(e) => setForm({ ...form, provider_id: e.target.value })}
+              MenuProps={{
+                slotProps: {
+                  paper: {
+                    sx: {
+                      mt: 0.5,
+                      borderRadius: 2,
+                      boxShadow: (theme: any) => theme.shadows[8],
+                    },
+                  },
+                },
+              }}
             >
               {providers.map((p) => (
                 <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>

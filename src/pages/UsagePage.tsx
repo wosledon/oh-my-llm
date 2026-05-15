@@ -8,7 +8,6 @@ import TableBody from '@mui/material/TableBody';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
-import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import { invoke } from '@tauri-apps/api/core';
@@ -35,9 +34,9 @@ export default function UsagePage() {
   const { t } = useI18n();
 
   const today = new Date().toISOString().split('T')[0];
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+  const fifteenDaysAgo = new Date(Date.now() - 15 * 86400000).toISOString().split('T')[0];
 
-  const [startDate, setStartDate] = useState(thirtyDaysAgo);
+  const [startDate, setStartDate] = useState(fifteenDaysAgo);
   const [endDate, setEndDate] = useState(today);
   const [daily, setDaily] = useState<DailyUsage[]>([]);
   const [summary, setSummary] = useState<UsageSummary>({
@@ -111,7 +110,6 @@ export default function UsagePage() {
                 fontFamily: 'inherit',
               }}
             />
-            <Button variant="contained" onClick={fetchUsage}>{t.common.confirm}</Button>
           </Box>
 
           <Box

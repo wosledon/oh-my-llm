@@ -1,4 +1,4 @@
-use crate::protocol::translator::openai_to_anthropic;
+use crate::protocol::translator::{openai_to_anthropic, anthropic_to_openai};
 use crate::providers::{DynProviderClient, ProviderClient, ProviderContext};
 use crate::protocol::openai_types::ChatCompletionRequest;
 use axum::body::Body;
@@ -73,10 +73,96 @@ impl ProviderClient for AnthropicClient {
         let status = resp.status();
 
         if is_stream {
-            let stream = resp.bytes_stream();
-            let body_stream = Body::from_stream(stream.map(|result| {
-                result.map_err(|e| axum::Error::new(e))
-            }));
+            let id = uuid::Uuid::new_v4().to_string();
+            let model = anthropic_req.model.clone();
+            let created = chrono::Utc::now().timestamp();
+            let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, axum::Error>>(32);
+
+            tokio::spawn(async move {
+                let mut stream = resp.bytes_stream();
+                let mut buffer = String::new();
+                let mut sent_role = false;
+
+                while let Some(chunk) = stream.next().await {
+                    match chunk {
+                        Ok(bytes) => {
+                            buffer.push_str(&String::from_utf8_lossy(&bytes));
+                            loop {
+                                if let Some(event_end) = buffer.find("\n\n") {
+                                    let event_text = buffer[..event_end].to_string();
+                                    buffer = buffer[event_end + 2..].to_string();
+
+                                    let mut event_type = String::new();
+                                    let mut data = String::new();
+                                    for line in event_text.lines() {
+                                        if line.starts_with("event: ") {
+                                            event_type = line[7..].to_string();
+                                        } else if line.starts_with("data: ") {
+                                            data = line[6..].to_string();
+                                        }
+                                    }
+
+                                    match event_type.as_str() {
+                                        "message_start" => {
+                                            if !sent_role {
+                                                let chunk = serde_json::json!({
+                                                    "id": id,
+                                                    "object": "chat.completion.chunk",
+                                                    "created": created,
+                                                    "model": model,
+                                                    "choices": [{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]
+                                                });
+                                                let _ = tx.send(Ok(bytes::Bytes::from(format!("data: {}\n\n", chunk)))).await;
+                                                sent_role = true;
+                                            }
+                                        }
+                                        "content_block_delta" => {
+                                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                                                if let Some(text) = json.get("delta").and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
+                                                    let chunk = serde_json::json!({
+                                                        "id": id,
+                                                        "object": "chat.completion.chunk",
+                                                        "created": created,
+                                                        "model": model,
+                                                        "choices": [{"index":0,"delta":{"content":text},"finish_reason":null}]
+                                                    });
+                                                    let _ = tx.send(Ok(bytes::Bytes::from(format!("data: {}\n\n", chunk)))).await;
+                                                    sent_role = true;
+                                                }
+                                            }
+                                        }
+                                        "message_delta" => {
+                                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                                                let finish_reason = json.get("delta").and_then(|d| d.get("stop_reason")).and_then(|s| s.as_str()).unwrap_or("stop");
+                                                let chunk = serde_json::json!({
+                                                    "id": id,
+                                                    "object": "chat.completion.chunk",
+                                                    "created": created,
+                                                    "model": model,
+                                                    "choices": [{"index":0,"delta":{},"finish_reason":finish_reason}]
+                                                });
+                                                let _ = tx.send(Ok(bytes::Bytes::from(format!("data: {}\n\n", chunk)))).await;
+                                            }
+                                        }
+                                        "message_stop" => {
+                                            let _ = tx.send(Ok(bytes::Bytes::from("data: [DONE]\n\n"))).await;
+                                        }
+                                        _ => {}
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(Err(axum::Error::new(e))).await;
+                            break;
+                        }
+                    }
+                }
+            });
+
+            let body_stream = Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(rx));
             let mut response = Response::new(body_stream);
             *response.status_mut() = status;
             response.headers_mut().insert(
@@ -89,8 +175,21 @@ impl ProviderClient for AnthropicClient {
                 .bytes()
                 .await
                 .map_err(|e| format!("Failed to read response body: {}", e))?;
-            let mut response = Response::new(Body::from(bytes));
+
+            let anthropic_resp: crate::protocol::anthropic_types::AnthropicResponse =
+                serde_json::from_slice(&bytes)
+                    .map_err(|e| format!("Failed to parse Anthropic response: {}", e))?;
+
+            let openai_resp = anthropic_to_openai(anthropic_resp);
+            let body = serde_json::to_vec(&openai_resp)
+                .map_err(|e| format!("Failed to serialize OpenAI response: {}", e))?;
+
+            let mut response = Response::new(Body::from(body));
             *response.status_mut() = status;
+            response.headers_mut().insert(
+                CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
             Ok(response)
         }
     }

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Drawer from '@mui/material/Drawer';
 import List from '@mui/material/List';
@@ -8,6 +9,9 @@ import ListItemText from '@mui/material/ListItemText';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
+import IconButton from '@mui/material/IconButton';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import HomeIcon from '@mui/icons-material/Home';
 import DnsIcon from '@mui/icons-material/Dns';
 import ViewInArIcon from '@mui/icons-material/ViewInAr';
@@ -15,6 +19,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import HistoryIcon from '@mui/icons-material/History';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import HubIcon from '@mui/icons-material/Hub';
+import TranslateIcon from '@mui/icons-material/Translate';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useI18n } from '../i18n';
 
@@ -23,7 +28,8 @@ const drawerWidth = 260;
 export default function Shell() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { t } = useI18n();
+  const { t, lang, setLang } = useI18n();
+  const [langMenuAnchor, setLangMenuAnchor] = useState<null | HTMLElement>(null);
 
   const navItems = [
     { value: '/', label: t.nav.dashboard, icon: HomeIcon },
@@ -47,6 +53,9 @@ export default function Shell() {
             bgcolor: 'background.paper',
             borderRight: '1px solid',
             borderColor: 'divider',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
           },
         }}
       >
@@ -57,7 +66,7 @@ export default function Shell() {
           </Typography>
         </Toolbar>
         <Divider />
-        <List sx={{ px: 1.5, py: 1 }}>
+        <List sx={{ px: 1.5, py: 1, flex: 1, overflow: 'auto' }}>
           <ListItem sx={{ py: 0.5 }}>
             <Typography variant="caption" color="text.secondary" sx={{ px: 1, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.5 }}>
               {t.app.platform}
@@ -86,6 +95,47 @@ export default function Shell() {
             </ListItem>
           ))}
         </List>
+        {/* 底部语言切换 */}
+        <Box sx={{ p: 2 }}>
+          <Divider sx={{ mb: 1.5 }} />
+          <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+            <IconButton
+              size="small"
+              onClick={(e) => setLangMenuAnchor(e.currentTarget)}
+              sx={{
+                width: 36,
+                height: 36,
+                borderRadius: 1.5,
+                bgcolor: 'action.hover',
+                color: 'text.secondary',
+                '&:hover': { bgcolor: 'action.selected' },
+              }}
+            >
+              <TranslateIcon fontSize="small" />
+            </IconButton>
+            <Menu
+              anchorEl={langMenuAnchor}
+              open={Boolean(langMenuAnchor)}
+              onClose={() => setLangMenuAnchor(null)}
+              anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+              transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+              slotProps={{ paper: { sx: { borderRadius: 2, boxShadow: 4 } } }}
+            >
+              <MenuItem
+                selected={lang === 'zh'}
+                onClick={() => { setLang('zh'); setLangMenuAnchor(null); }}
+              >
+                中文
+              </MenuItem>
+              <MenuItem
+                selected={lang === 'en'}
+                onClick={() => { setLang('en'); setLangMenuAnchor(null); }}
+              >
+                English
+              </MenuItem>
+            </Menu>
+          </Box>
+        </Box>
       </Drawer>
       <Box
         component="main"
@@ -93,7 +143,7 @@ export default function Shell() {
           flexGrow: 1,
           bgcolor: 'background.default',
           overflow: 'auto',
-          p: 4,
+          p: 2.5,
         }}
       >
         <Outlet />
