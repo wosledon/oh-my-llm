@@ -138,5 +138,6 @@ export const en: Translation = {
     error: 'Error',
     confirm: 'Confirm',
     close: 'Close',
+    edit: 'Edit',
   },
 };

@@ -136,6 +136,7 @@ export interface Translation {
     error: string;
     confirm: string;
     close: string;
+    edit: string;
   };
 }
 
@@ -277,5 +278,6 @@ export const zh: Translation = {
     error: '错误',
     confirm: '确认',
     close: '关闭',
+    edit: '编辑',
   },
 } as const;

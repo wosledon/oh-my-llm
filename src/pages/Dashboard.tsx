@@ -18,6 +18,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CheckIcon from '@mui/icons-material/Check';
+import EditIcon from '@mui/icons-material/Edit';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import DnsIcon from '@mui/icons-material/Dns';
 import ViewInArIcon from '@mui/icons-material/ViewInAr';
@@ -120,17 +121,19 @@ export default function Dashboard() {
     try { await navigator.clipboard.writeText(anthropicAddress); setCopiedAnthropic(true); setTimeout(() => setCopiedAnthropic(false), 2000); } catch {}
   };
 
+  const [editingPort, setEditingPort] = useState(false);
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      {/* 第一行：代理状态 | 影子模型 | 代理地址 */}
+      {/* 第一行：代理状态 | 影子模型 */}
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', md: '220px 1fr 1fr' },
+          gridTemplateColumns: { xs: '1fr', md: '320px 1fr' },
           gap: 2.5,
         }}
       >
-        {/* 左列：代理状态（紧凑） */}
+        {/* 左列：代理状态（含端口编辑 + 协议开关） */}
         <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
           <CardContent sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -147,13 +150,87 @@ export default function Dashboard() {
               </Box>
             </Box>
 
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75 }}>
-              <Typography variant="h4" sx={{ fontWeight: 800, lineHeight: 1 }}>
-                {config ? config.port : '--'}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {t.dashboard.port}
-              </Typography>
+            {/* 端口显示 / 编辑 */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minHeight: 40 }}>
+              {editingPort ? (
+                <TextField
+                  size="small"
+                  type="number"
+                  autoFocus
+                  value={portInput}
+                  onChange={(e) => setPortInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const cfg = config;
+                      if (!cfg) return;
+                      const port = parseInt(portInput) || 11888;
+                      if (port !== cfg.port) {
+                        updateConfig({ ...cfg, port });
+                      }
+                      setEditingPort(false);
+                    } else if (e.key === 'Escape') {
+                      setPortInput(String(config?.port ?? 11888));
+                      setEditingPort(false);
+                    }
+                  }}
+                  sx={{ width: 120, '& input': { fontWeight: 800, fontSize: '1.75rem', py: 0.5 } }}
+                />
+              ) : (
+                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, flex: 1 }}>
+                  <Typography variant="h4" sx={{ fontWeight: 800, lineHeight: 1 }}>
+                    {config ? config.port : '--'}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {t.dashboard.port}
+                  </Typography>
+                </Box>
+              )}
+              <Box
+                component="span"
+                onMouseDown={(e) => e.preventDefault()}
+                sx={{ display: 'inline-flex' }}
+              >
+                <Button
+                  variant="text"
+                  size="small"
+                  sx={{ minWidth: 32, width: 32, height: 32, p: 0, borderRadius: 1 }}
+                  onClick={() => {
+                    const cfg = config;
+                    if (!cfg) return;
+                    if (editingPort) {
+                      const port = parseInt(portInput) || 11888;
+                      if (port !== cfg.port) {
+                        updateConfig({ ...cfg, port });
+                      }
+                    }
+                    setEditingPort(!editingPort);
+                  }}
+                >
+                  {editingPort ? <CheckIcon fontSize="small" /> : <EditIcon fontSize="small" />}
+                </Button>
+              </Box>
+            </Box>
+
+            {/* 协议开关 */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <ProtocolSwitch
+                checked={config?.openai_enabled ?? true}
+                onChange={(v) => {
+                  if (!config) return;
+                  updateConfig({ ...config, openai_enabled: v });
+                }}
+                label={t.settings.openaiEnabled}
+                color="primary"
+              />
+              <ProtocolSwitch
+                checked={config?.anthropic_enabled ?? true}
+                onChange={(v) => {
+                  if (!config) return;
+                  updateConfig({ ...config, anthropic_enabled: v });
+                }}
+                label={t.settings.anthropicEnabled}
+                color="secondary"
+              />
             </Box>
 
             <Button
@@ -174,7 +251,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* 中列：影子模型 */}
+        {/* 右列：影子模型 */}
         <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
           <CardContent sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -264,19 +341,21 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
+      </Box>
 
-        {/* 右列：代理地址（OpenAI + Anthropic） */}
-        <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
-          <CardContent sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Box sx={iconBg('primary')}>
-                <OpenInNewIcon fontSize="small" />
-              </Box>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                {t.dashboard.proxyAddress}
-              </Typography>
+      {/* 第二行：代理地址（占满宽度） */}
+      <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+        <CardContent sx={{ p: 2.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+            <Box sx={iconBg('primary')}>
+              <OpenInNewIcon fontSize="small" />
             </Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+              {t.dashboard.proxyAddress}
+            </Typography>
+          </Box>
 
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
             {/* OpenAI 地址 */}
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
@@ -346,64 +425,22 @@ export default function Dashboard() {
                 </Button>
               </Box>
             </Box>
+          </Box>
 
-            {/* 统计 */}
-            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mt: 'auto', pt: 0.5 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                <DnsIcon fontSize="small" sx={{ color: 'text.disabled', fontSize: 16 }} />
-                <Typography variant="caption" color="text.secondary">
-                  <strong>{providers.length}</strong> {t.dashboard.providerCount}
-                </Typography>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                <ViewInArIcon fontSize="small" sx={{ color: 'text.disabled', fontSize: 16 }} />
-                <Typography variant="caption" color="text.secondary">
-                  <strong>{models.length}</strong> {t.dashboard.modelCount} / <strong>{enabledModels}</strong>{t.dashboard.enabledCount}
-                </Typography>
-              </Box>
+          {/* 统计 */}
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mt: 2, pt: 0.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <DnsIcon fontSize="small" sx={{ color: 'text.disabled', fontSize: 16 }} />
+              <Typography variant="caption" color="text.secondary">
+                <strong>{providers.length}</strong> {t.dashboard.providerCount}
+              </Typography>
             </Box>
-          </CardContent>
-        </Card>
-      </Box>
-
-      {/* 第二行：协议开关 + 端口 */}
-      <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
-        <CardContent sx={{ p: 2.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            <TextField
-              size="small"
-              type="number"
-              label={t.settings.port}
-              value={portInput}
-              onChange={(e) => setPortInput(e.target.value)}
-              onBlur={() => {
-                if (!config) return;
-                const port = parseInt(portInput) || 11888;
-                if (port !== config.port) {
-                  updateConfig({ ...config, port });
-                }
-              }}
-              onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }}
-              sx={{ width: 120 }}
-            />
-            <ProtocolSwitch
-              checked={config?.openai_enabled ?? true}
-              onChange={(v) => {
-                if (!config) return;
-                updateConfig({ ...config, openai_enabled: v });
-              }}
-              label={t.settings.openaiEnabled}
-              color="primary"
-            />
-            <ProtocolSwitch
-              checked={config?.anthropic_enabled ?? true}
-              onChange={(v) => {
-                if (!config) return;
-                updateConfig({ ...config, anthropic_enabled: v });
-              }}
-              label={t.settings.anthropicEnabled}
-              color="secondary"
-            />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <ViewInArIcon fontSize="small" sx={{ color: 'text.disabled', fontSize: 16 }} />
+              <Typography variant="caption" color="text.secondary">
+                <strong>{models.length}</strong> {t.dashboard.modelCount} / <strong>{enabledModels}</strong>{t.dashboard.enabledCount}
+              </Typography>
+            </Box>
           </Box>
         </CardContent>
       </Card>
