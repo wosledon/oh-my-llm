@@ -5,8 +5,12 @@ import {
   makeStyles,
   shorthands,
   tokens,
-  TabList,
-  Tab,
+  NavDrawer,
+  NavDrawerBody,
+  NavDrawerHeader,
+  NavItem,
+  NavSectionHeader,
+  Text,
 } from '@fluentui/react-components';
 import {
   Home24Regular,
@@ -15,9 +19,11 @@ import {
   Settings24Regular,
   History24Regular,
   DataUsage24Regular,
+  Circle16Regular,
 } from '@fluentui/react-icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
+import { useI18n } from '../i18n';
 
 const useStyles = makeStyles({
   root: {
@@ -27,36 +33,38 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground3,
   },
-  sidebar: {
-    width: '220px',
+  navDrawer: {
+    width: '260px',
     flexShrink: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    ...shorthands.padding('16px', '8px'),
     backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.borderRight('1px', 'solid', tokens.colorNeutralStroke3),
+  },
+  navHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    ...shorthands.padding('20px', '16px', '12px'),
+  },
+  navHeaderIcon: {
+    color: tokens.colorBrandForeground1,
+  },
+  navBody: {
+    ...shorthands.padding('4px', '12px'),
   },
   content: {
     flex: 1,
     overflow: 'auto',
-    ...shorthands.padding('20px'),
+    ...shorthands.padding('28px', '32px'),
+    backgroundColor: tokens.colorNeutralBackground3,
   },
 });
-
-const navItems = [
-  { value: '/', label: 'Dashboard', icon: Home24Regular },
-  { value: '/usage', label: 'Usage', icon: DataUsage24Regular },
-  { value: '/providers', label: 'Providers', icon: Server24Regular },
-  { value: '/models', label: 'Models', icon: Cube24Regular },
-  { value: '/settings', label: 'Settings', icon: Settings24Regular },
-  { value: '/logs', label: 'Logs', icon: History24Regular },
-];
 
 export default function Shell() {
   const styles = useStyles();
   const location = useLocation();
   const navigate = useNavigate();
   const [isDark, setIsDark] = useState(false);
+  const { t } = useI18n();
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -66,22 +74,46 @@ export default function Shell() {
     return () => media.removeEventListener('change', handler);
   }, []);
 
+  const navItems = [
+    { value: '/', label: t.nav.dashboard, icon: Home24Regular },
+    { value: '/usage', label: t.nav.usage, icon: DataUsage24Regular },
+    { value: '/providers', label: t.nav.providers, icon: Server24Regular },
+    { value: '/models', label: t.nav.models, icon: Cube24Regular },
+    { value: '/settings', label: t.nav.settings, icon: Settings24Regular },
+    { value: '/logs', label: t.nav.logs, icon: History24Regular },
+  ];
+
   return (
     <FluentProvider theme={isDark ? webDarkTheme : webLightTheme}>
       <div className={styles.root}>
-        <div className={styles.sidebar}>
-          <TabList
-            vertical
-            selectedValue={location.pathname}
-            onTabSelect={(_, data) => navigate(String(data.value))}
-          >
+        <NavDrawer className={styles.navDrawer} type="inline" open={true}>
+          <NavDrawerHeader>
+            <div className={styles.navHeader}>
+              <Circle16Regular className={styles.navHeaderIcon} />
+              <Text weight="semibold" size={400}>
+                {t.app.name}
+              </Text>
+            </div>
+          </NavDrawerHeader>
+          <NavDrawerBody className={styles.navBody}>
+            <NavSectionHeader>{t.app.platform}</NavSectionHeader>
             {navItems.map((item) => (
-              <Tab key={item.value} value={item.value} icon={<item.icon />}>
+              <NavItem
+                key={item.value}
+                icon={<item.icon />}
+                value={item.value}
+                onClick={() => navigate(item.value)}
+                style={
+                  location.pathname === item.value
+                    ? { backgroundColor: tokens.colorNeutralBackground2 }
+                    : undefined
+                }
+              >
                 {item.label}
-              </Tab>
+              </NavItem>
             ))}
-          </TabList>
-        </div>
+          </NavDrawerBody>
+        </NavDrawer>
         <div className={styles.content}>
           <Outlet />
         </div>

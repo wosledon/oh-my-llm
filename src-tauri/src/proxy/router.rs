@@ -13,6 +13,7 @@ pub struct ProxyState {
     pub db: Arc<Mutex<Connection>>,
     pub openai_client: DynProviderClient,
     pub compatible_client: DynProviderClient,
+    pub anthropic_client: DynProviderClient,
 }
 
 impl ProxyState {
@@ -21,6 +22,7 @@ impl ProxyState {
             db,
             openai_client: crate::providers::openai::create_client(),
             compatible_client: crate::providers::compatible::create_client(),
+            anthropic_client: crate::providers::anthropic::create_client(),
         }
     }
 }
@@ -82,7 +84,7 @@ pub fn select_client(state: &ProxyState, prov_type: &str) -> Result<DynProviderC
     match prov_type {
         "openai" => Ok(state.openai_client.clone()),
         "openai_compatible" => Ok(state.compatible_client.clone()),
-        "anthropic" => Err("Anthropic provider not yet supported in Phase 2".to_string()),
+        "anthropic" => Ok(state.anthropic_client.clone()),
         _ => Err(format!("Unknown provider type: {}", prov_type)),
     }
 }

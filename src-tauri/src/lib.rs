@@ -5,9 +5,11 @@ use tokio::sync::Mutex;
 
 pub mod commands;
 pub mod crypto;
+pub mod logging;
 pub mod protocol;
 pub mod providers;
 pub mod proxy;
+pub mod stats;
 pub mod storage;
 
 pub struct AppState {
@@ -43,6 +45,9 @@ pub fn run() {
             commands::proxy_cmd::stop_proxy,
             commands::proxy_cmd::restart_proxy,
             commands::proxy_cmd::get_proxy_status,
+            commands::log_cmd::query_logs,
+            commands::log_cmd::get_log_detail,
+            commands::stats_cmd::get_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

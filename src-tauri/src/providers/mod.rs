@@ -1,5 +1,6 @@
 pub mod openai;
 pub mod compatible;
+pub mod anthropic;
 
 use crate::storage::Provider;
 use axum::body::Body;
