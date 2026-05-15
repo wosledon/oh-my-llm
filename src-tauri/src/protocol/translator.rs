@@ -64,6 +64,7 @@ pub fn anthropic_to_openai(resp: AnthropicResponse) -> ChatCompletionResponse {
                 role: "assistant".to_string(),
                 name: None,
                 content: Some(crate::protocol::openai_types::ChatContent::Text(content)),
+                reasoning_content: None,
                 tool_calls: None,
                 tool_call_id: None,
             },
@@ -87,6 +88,7 @@ pub fn anthropic_to_openai_request(req: AnthropicRequest) -> ChatCompletionReque
             role: "system".to_string(),
             name: None,
             content: Some(crate::protocol::openai_types::ChatContent::Text(system)),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
         });
@@ -97,6 +99,7 @@ pub fn anthropic_to_openai_request(req: AnthropicRequest) -> ChatCompletionReque
             role: msg.role,
             name: None,
             content: Some(crate::protocol::openai_types::ChatContent::Text(msg.content)),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
         });
@@ -130,6 +133,7 @@ pub fn openai_to_anthropic_response(resp: ChatCompletionResponse) -> AnthropicRe
             role: "assistant".to_string(),
             name: None,
             content: Some(crate::protocol::openai_types::ChatContent::Text("".to_string())),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
         },

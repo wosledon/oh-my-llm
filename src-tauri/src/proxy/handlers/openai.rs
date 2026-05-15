@@ -4,7 +4,254 @@ use axum::body::{to_bytes, Body};
 use axum::extract::State;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
+use futures_util::StreamExt;
 use std::time::Instant;
+
+// ── Think tag filter (cross-chunk stateful) ──────────────────────────────
+
+struct ThinkFilter {
+    /// text inside <think> that hasn't been closed yet
+    pending: String,
+    in_think: bool,
+    /// incomplete SSE event left from previous chunk
+    sse_buffer: String,
+}
+
+/// Move prefix bytes from `s` to a new string, leaving at most `tail_len` bytes.
+/// Split point is guaranteed to be on a UTF-8 character boundary.
+fn drain_prefix(s: &mut String, tail_len: usize) -> String {
+    if s.len() <= tail_len {
+        return String::new();
+    }
+    let mut split = s.len() - tail_len;
+    while split > 0 && !s.is_char_boundary(split) {
+        split -= 1;
+    }
+    let prefix = s[..split].to_string();
+    *s = s[split..].to_string();
+    prefix
+}
+
+/// Return the tail of `s` with at most `tail_len` bytes, starting on a char boundary.
+fn safe_tail(s: &str, tail_len: usize) -> &str {
+    if s.len() <= tail_len {
+        return s;
+    }
+    let mut split = s.len() - tail_len;
+    while split > 0 && !s.is_char_boundary(split) {
+        split -= 1;
+    }
+    &s[split..]
+}
+
+impl ThinkFilter {
+    fn new() -> Self {
+        Self {
+            pending: String::new(),
+            in_think: false,
+            sse_buffer: String::new(),
+        }
+    }
+
+    /// Process incoming text and return (reasoning_content, visible_content).
+    /// Handles think tags that may be split across multiple process() calls.
+    fn process(&mut self, text: &str) -> (String, String) {
+        self.pending.push_str(text);
+        let mut reasoning = String::new();
+        let mut content = String::new();
+
+        loop {
+            if self.in_think {
+                if let Some(pos) = self.pending.find("</think>") {
+                    reasoning.push_str(&self.pending[..pos]);
+                    self.pending = self.pending[pos + 8..].to_string();
+                    self.in_think = false;
+                } else {
+                    // Keep at most 7 trailing chars (</think> is 8 chars).
+                    // If no '/' in the tail, it's safe to emit everything.
+                    let keep = 7usize;
+                    if self.pending.len() > keep {
+                        if safe_tail(&self.pending, keep).contains('/') {
+                            reasoning.push_str(&drain_prefix(&mut self.pending, keep));
+                        } else {
+                            reasoning.push_str(&self.pending);
+                            self.pending.clear();
+                        }
+                    }
+                    break;
+                }
+            } else {
+                if let Some(pos) = self.pending.find("<think>") {
+                    content.push_str(&self.pending[..pos]);
+                    self.pending = self.pending[pos + 7..].to_string();
+                    self.in_think = true;
+                } else {
+                    // Keep at most 6 trailing chars (<think> is 7 chars).
+                    // If no '<' in the tail, it's safe to emit everything.
+                    let keep = 6usize;
+                    if self.pending.len() > keep {
+                        if safe_tail(&self.pending, keep).contains('<') {
+                            content.push_str(&drain_prefix(&mut self.pending, keep));
+                        } else {
+                            content.push_str(&self.pending);
+                            self.pending.clear();
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        (reasoning, content)
+    }
+
+    fn flush(self) -> (String, String) {
+        if self.in_think {
+            (self.pending, String::new())
+        } else {
+            (String::new(), self.pending)
+        }
+    }
+
+    /// Consume one raw SSE chunk, parse complete events, filter think tags,
+    /// and return the transformed bytes. Incomplete events are kept in `sse_buffer`.
+    fn process_sse_chunk(&mut self,
+        chunk: &bytes::Bytes,
+    ) -> bytes::Bytes {
+        let text = String::from_utf8_lossy(chunk);
+        self.sse_buffer.push_str(&text);
+        let mut output = Vec::new();
+
+        while let Some(pos) = self.sse_buffer.find("\n\n") {
+            let event = self.sse_buffer[..pos].to_string();
+            self.sse_buffer = self.sse_buffer[pos + 2..].to_string();
+
+            let mut data_line: Option<String> = None;
+            let mut other_lines: Vec<String> = Vec::new();
+            for line in event.lines() {
+                if line.starts_with("data: ") {
+                    data_line = Some(line[6..].to_string());
+                } else {
+                    other_lines.push(line.to_string());
+                }
+            }
+
+            if let Some(data) = data_line {
+                if data == "[DONE]" {
+                    // flush any remaining reasoning before DONE
+                    let (final_reasoning, final_content) = {
+                        let f = std::mem::replace(self, ThinkFilter::new());
+                        f.flush()
+                    };
+                    if !final_reasoning.is_empty() || !final_content.is_empty() {
+                        let mut flush_json = serde_json::json!({
+                            "choices": [{"index":0,"delta":{},"finish_reason":null}]
+                        });
+                        if !final_reasoning.is_empty() {
+                            flush_json["choices"][0]["delta"]["reasoning_content"] =
+                                serde_json::Value::String(final_reasoning);
+                        }
+                        if !final_content.is_empty() {
+                            flush_json["choices"][0]["delta"]["content"] =
+                                serde_json::Value::String(final_content);
+                        }
+                        output.extend_from_slice(
+                            format!(
+                                "data: {}\n",
+                                serde_json::to_string(&flush_json).unwrap_or_default()
+                            )
+                            .as_bytes(),
+                        );
+                        for line in &other_lines {
+                            output.extend_from_slice(format!("\n{}", line).as_bytes());
+                        }
+                        output.extend_from_slice(b"\n\n");
+                    }
+                    output.extend_from_slice(b"data: [DONE]\n\n");
+                    continue;
+                }
+
+                if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&data) {
+                    if let Some(content) = json
+                        .pointer("/choices/0/delta/content")
+                        .and_then(|c| c.as_str())
+                    {
+                        let (reasoning, new_content) = self.process(content);
+                        if !reasoning.is_empty() {
+                            json["choices"][0]["delta"]["reasoning_content"] =
+                                serde_json::Value::String(reasoning);
+                        }
+                        if new_content.is_empty() {
+                            json["choices"][0]["delta"].as_object_mut().map(|m| {
+                                m.remove("content");
+                            });
+                        } else {
+                            json["choices"][0]["delta"]["content"] =
+                                serde_json::Value::String(new_content);
+                        }
+                    }
+                    output.extend_from_slice(
+                        format!(
+                            "data: {}",
+                            serde_json::to_string(&json).unwrap_or_default()
+                        )
+                        .as_bytes(),
+                    );
+                    for line in &other_lines {
+                        output.extend_from_slice(format!("\n{}", line).as_bytes());
+                    }
+                    output.extend_from_slice(b"\n\n");
+                } else {
+                    output.extend_from_slice(event.as_bytes());
+                    output.extend_from_slice(b"\n\n");
+                }
+            } else {
+                output.extend_from_slice(event.as_bytes());
+                output.extend_from_slice(b"\n\n");
+            }
+        }
+
+        bytes::Bytes::from(output)
+    }
+}
+
+/// Strip `<think>...</think>` from non-stream JSON response and move it to `reasoning_content`.
+fn strip_think_tags(body: &str) -> String {
+    let mut val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => return body.to_string(),
+    };
+
+    if let Some(choices) = val.get_mut("choices").and_then(|c| c.as_array_mut()) {
+        for choice in choices {
+            if let Some(msg) = choice.get_mut("message") {
+                let content_str: Option<String> = msg
+                    .get("content")
+                    .and_then(|c| c.as_str())
+                    .map(|s| s.to_string());
+                if let Some(content_str) = content_str {
+                    if let Some(start) = content_str.find("<think>") {
+                        if let Some(end) = content_str.find("</think>") {
+                            let before = content_str[..start].trim_end();
+                            let think = content_str[start + 7..end].trim();
+                            let after = content_str[end + 8..].trim_start();
+                            let new_content = format!("{}{}", before, after);
+                            msg["content"] = serde_json::Value::String(new_content);
+                            if !think.is_empty() {
+                                msg["reasoning_content"] =
+                                    serde_json::Value::String(think.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    serde_json::to_string(&val).unwrap_or_else(|_| body.to_string())
+}
+
+// ── Handler ──────────────────────────────────────────────────────────────
 
 pub async fn handle_chat_completions(
     State(state): State<ProxyState>,
@@ -92,11 +339,32 @@ pub async fn handle_chat_completions(
     match result {
         Ok(resp) => {
             let status_code = resp.status().as_u16() as i64;
+            let request_body_str = String::from_utf8_lossy(&bytes).to_string();
 
-            if log_requests {
-                let request_body_str = String::from_utf8_lossy(&bytes).to_string();
+            if is_stream {
+                // ── Streaming: transform think tags in real-time ──
+                let status = resp.status();
+                let headers = resp.headers().clone();
+                let body = resp.into_body();
+                let stream = body.into_data_stream();
+                let mut filter = ThinkFilter::new();
 
-                if is_stream {
+                let transformed = stream.map(move |result| {
+                    match result {
+                        Ok(chunk) => {
+                            let out = filter.process_sse_chunk(&chunk);
+                            Ok(out)
+                        }
+                        Err(e) => Err(e),
+                    }
+                });
+
+                let new_body = Body::from_stream(transformed);
+                let mut response = Response::new(new_body);
+                *response.status_mut() = status;
+                *response.headers_mut() = headers;
+
+                if log_requests {
                     let _ = log_request(
                         &state,
                         &original_model,
@@ -111,12 +379,15 @@ pub async fn handle_chat_completions(
                         &request_body_str,
                         "[streaming]",
                     );
-                    return resp;
                 }
+                return response;
+            }
 
-                let body_bytes = match axum::body::to_bytes(resp.into_body(), 10 * 1024 * 1024).await {
-                    Ok(b) => b,
-                    Err(_) => {
+            // ── Non-streaming: strip think tags ──
+            let body_bytes = match axum::body::to_bytes(resp.into_body(), 10 * 1024 * 1024).await {
+                Ok(b) => b,
+                Err(_) => {
+                    if log_requests {
                         let _ = log_request(
                             &state,
                             &original_model,
@@ -131,13 +402,17 @@ pub async fn handle_chat_completions(
                             &request_body_str,
                             "[error reading body]",
                         );
-                        return build_error_response(StatusCode::BAD_GATEWAY, "Failed to read upstream response");
                     }
-                };
-                let response_body_str = String::from_utf8_lossy(&body_bytes).to_string();
-                let (prompt_tokens, completion_tokens, cost) =
-                    extract_usage(&response_body_str, input_price, output_price);
+                    return build_error_response(StatusCode::BAD_GATEWAY, "Failed to read upstream response");
+                }
+            };
 
+            let response_body_str = String::from_utf8_lossy(&body_bytes).to_string();
+            let processed_body = strip_think_tags(&response_body_str);
+            let (prompt_tokens, completion_tokens, cost) =
+                extract_usage(&processed_body, input_price, output_price);
+
+            if log_requests {
                 let _ = log_request(
                     &state,
                     &original_model,
@@ -150,15 +425,13 @@ pub async fn handle_chat_completions(
                     completion_tokens,
                     cost,
                     &request_body_str,
-                    &response_body_str,
+                    &processed_body,
                 );
-
-                let mut response = Response::new(Body::from(body_bytes));
-                *response.status_mut() = StatusCode::from_u16(status_code as u16).unwrap_or(StatusCode::OK);
-                return response;
             }
 
-            resp
+            let mut response = Response::new(Body::from(processed_body.into_bytes()));
+            *response.status_mut() = StatusCode::from_u16(status_code as u16).unwrap_or(StatusCode::OK);
+            response
         }
         Err(e) => {
             if log_requests {
