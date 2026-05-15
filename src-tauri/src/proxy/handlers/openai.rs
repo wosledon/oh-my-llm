@@ -1,4 +1,4 @@
-use crate::protocol::openai_types::{ChatCompletionRequest, ErrorResponse, ApiError};
+use crate::protocol::openai_types::{ApiError, ChatCompletionRequest, ErrorResponse};
 use crate::proxy::router::{resolve_model_route, resolve_shadow_route, select_client, ProxyState};
 use axum::body::{to_bytes, Body};
 use axum::extract::State;
@@ -9,12 +9,61 @@ use std::time::Instant;
 
 // ── Think tag filter (cross-chunk stateful) ──────────────────────────────
 
+#[derive(Clone)]
+struct ThinkTagConfig {
+    start: String,
+    end: String,
+}
+
+impl ThinkTagConfig {
+    fn think() -> Self {
+        Self {
+            start: "<think>".to_string(),
+            end: "</think>".to_string(),
+        }
+    }
+}
+
+/// Return a config if the upstream model is known to wrap reasoning in think tags.
+/// Models are matched by name heuristics.  Unmatched models pass through untouched.
+fn needs_think_filter(model_name: &str) -> Option<ThinkTagConfig> {
+    let name = model_name.to_lowercase();
+
+    // DeepSeek reasoning models (R1, Reasoner, V4)
+    if name.contains("deepseek")
+        && (name.contains("reasoner") || name.contains("r1") || name.contains("v4"))
+    {
+        return Some(ThinkTagConfig::think());
+    }
+
+    // Qwen QwQ series
+    if name.contains("qwq") || name.contains("qwen-qwq") {
+        return Some(ThinkTagConfig::think());
+    }
+
+    // Kimi / Moonshot K1 / reasoning variants
+    if name.contains("kimi") && (name.contains("k1") || name.contains("reasoning")) {
+        return Some(ThinkTagConfig::think());
+    }
+
+    // Xiaomi MiMo (GCMP reference)
+    if name.starts_with("mimo-") || name.contains("mimo-v") || name.contains("xiaomimimo") {
+        return Some(ThinkTagConfig::think());
+    }
+
+    // Generic fallback: any model id containing "reasoning" or "think"
+    if name.contains("reasoning") || name.contains("-think-") {
+        return Some(ThinkTagConfig::think());
+    }
+
+    None
+}
+
 struct ThinkFilter {
-    /// text inside <think> that hasn't been closed yet
     pending: String,
     in_think: bool,
-    /// incomplete SSE event left from previous chunk
     sse_buffer: String,
+    config: ThinkTagConfig,
 }
 
 /// Move prefix bytes from `s` to a new string, leaving at most `tail_len` bytes.
@@ -45,11 +94,12 @@ fn safe_tail(s: &str, tail_len: usize) -> &str {
 }
 
 impl ThinkFilter {
-    fn new() -> Self {
+    fn new(config: ThinkTagConfig) -> Self {
         Self {
             pending: String::new(),
             in_think: false,
             sse_buffer: String::new(),
+            config,
         }
     }
 
@@ -59,38 +109,38 @@ impl ThinkFilter {
         self.pending.push_str(text);
         let mut reasoning = String::new();
         let mut content = String::new();
+        let start_len = self.config.start.len();
+        let end_len = self.config.end.len();
 
         loop {
             if self.in_think {
-                if let Some(pos) = self.pending.find("</think>") {
+                if let Some(pos) = self.pending.find(&self.config.end) {
                     reasoning.push_str(&self.pending[..pos]);
-                    self.pending = self.pending[pos + 8..].to_string();
+                    self.pending = self.pending[pos + end_len..].to_string();
                     self.in_think = false;
                 } else {
-                    // Keep at most 7 trailing chars (</think> is 8 chars).
-                    // If no '/' in the tail, it's safe to emit everything.
-                    let keep = 7usize;
-                    if self.pending.len() > keep {
-                        if safe_tail(&self.pending, keep).contains('/') {
-                            reasoning.push_str(&drain_prefix(&mut self.pending, keep));
-                        } else {
-                            reasoning.push_str(&self.pending);
-                            self.pending.clear();
-                        }
+                    // Streaming: emit everything except the trailing bytes
+                    // that could be part of the end tag.  This keeps
+                    // reasoning_content flowing in real-time instead of
+                    // buffering until the tag is closed.
+                    if self.pending.len() > end_len {
+                        reasoning.push_str(&drain_prefix(&mut self.pending, end_len));
                     }
                     break;
                 }
             } else {
-                if let Some(pos) = self.pending.find("<think>") {
+                if let Some(pos) = self.pending.find(&self.config.start) {
                     content.push_str(&self.pending[..pos]);
-                    self.pending = self.pending[pos + 7..].to_string();
+                    self.pending = self.pending[pos + start_len..].to_string();
                     self.in_think = true;
                 } else {
-                    // Keep at most 6 trailing chars (<think> is 7 chars).
-                    // If no '<' in the tail, it's safe to emit everything.
-                    let keep = 6usize;
+                    // Keep at most (start_len - 1) trailing chars.
+                    // If the first char of start tag is not in the tail,
+                    // it's safe to emit everything.
+                    let keep = start_len.saturating_sub(1);
                     if self.pending.len() > keep {
-                        if safe_tail(&self.pending, keep).contains('<') {
+                        let first_char = self.config.start.chars().next().unwrap_or('<');
+                        if safe_tail(&self.pending, keep).contains(first_char) {
                             content.push_str(&drain_prefix(&mut self.pending, keep));
                         } else {
                             content.push_str(&self.pending);
@@ -115,9 +165,7 @@ impl ThinkFilter {
 
     /// Consume one raw SSE chunk, parse complete events, filter think tags,
     /// and return the transformed bytes. Incomplete events are kept in `sse_buffer`.
-    fn process_sse_chunk(&mut self,
-        chunk: &bytes::Bytes,
-    ) -> bytes::Bytes {
+    fn process_sse_chunk(&mut self, chunk: &bytes::Bytes) -> bytes::Bytes {
         let text = String::from_utf8_lossy(chunk);
         self.sse_buffer.push_str(&text);
         let mut output = Vec::new();
@@ -140,7 +188,7 @@ impl ThinkFilter {
                 if data == "[DONE]" {
                     // flush any remaining reasoning before DONE
                     let (final_reasoning, final_content) = {
-                        let f = std::mem::replace(self, ThinkFilter::new());
+                        let f = std::mem::replace(self, ThinkFilter::new(self.config.clone()));
                         f.flush()
                     };
                     if !final_reasoning.is_empty() || !final_content.is_empty() {
@@ -191,11 +239,8 @@ impl ThinkFilter {
                         }
                     }
                     output.extend_from_slice(
-                        format!(
-                            "data: {}",
-                            serde_json::to_string(&json).unwrap_or_default()
-                        )
-                        .as_bytes(),
+                        format!("data: {}", serde_json::to_string(&json).unwrap_or_default())
+                            .as_bytes(),
                     );
                     for line in &other_lines {
                         output.extend_from_slice(format!("\n{}", line).as_bytes());
@@ -215,12 +260,15 @@ impl ThinkFilter {
     }
 }
 
-/// Strip `<think>...</think>` from non-stream JSON response and move it to `reasoning_content`.
-fn strip_think_tags(body: &str) -> String {
+/// Strip think tags from non-stream JSON response and move it to `reasoning_content`.
+fn strip_think_tags(body: &str, config: &ThinkTagConfig) -> String {
     let mut val: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(_) => return body.to_string(),
     };
+
+    let start_len = config.start.len();
+    let end_len = config.end.len();
 
     if let Some(choices) = val.get_mut("choices").and_then(|c| c.as_array_mut()) {
         for choice in choices {
@@ -230,11 +278,11 @@ fn strip_think_tags(body: &str) -> String {
                     .and_then(|c| c.as_str())
                     .map(|s| s.to_string());
                 if let Some(content_str) = content_str {
-                    if let Some(start) = content_str.find("<think>") {
-                        if let Some(end) = content_str.find("</think>") {
+                    if let Some(start) = content_str.find(&config.start) {
+                        if let Some(end) = content_str.find(&config.end) {
                             let before = content_str[..start].trim_end();
-                            let think = content_str[start + 7..end].trim();
-                            let after = content_str[end + 8..].trim_start();
+                            let think = content_str[start + start_len..end].trim();
+                            let after = content_str[end + end_len..].trim_start();
                             let new_content = format!("{}{}", before, after);
                             msg["content"] = serde_json::Value::String(new_content);
                             if !think.is_empty() {
@@ -272,10 +320,7 @@ pub async fn handle_chat_completions(
     let mut request: ChatCompletionRequest = match serde_json::from_slice(&bytes) {
         Ok(r) => r,
         Err(e) => {
-            return build_error_response(
-                StatusCode::BAD_REQUEST,
-                &format!("Invalid JSON: {}", e),
-            );
+            return build_error_response(StatusCode::BAD_REQUEST, &format!("Invalid JSON: {}", e));
         }
     };
 
@@ -288,7 +333,10 @@ pub async fn handle_chat_completions(
         Ok(c) => c,
         Err(_) => {
             drop(db_guard);
-            return build_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to read proxy config");
+            return build_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to read proxy config",
+            );
         }
     };
 
@@ -319,7 +367,8 @@ pub async fn handle_chat_completions(
     let log_requests = config.log_requests;
 
     // Query model prices before dropping db guard
-    let models = crate::storage::model_repo::list_models(&db_guard, Some(&provider_id)).unwrap_or_default();
+    let models =
+        crate::storage::model_repo::list_models(&db_guard, Some(&provider_id)).unwrap_or_default();
     let model_info = models.iter().find(|m| m.upstream_name == upstream_model);
     let input_price = model_info.map(|m| m.input_price).unwrap_or(2.0);
     let output_price = model_info.map(|m| m.output_price).unwrap_or(6.0);
@@ -333,6 +382,9 @@ pub async fn handle_chat_completions(
     };
     drop(db_guard);
 
+    // Pre-compute prompt token estimate before request is moved
+    let estimated_prompt = estimate_prompt_tokens(&request);
+
     let result = client.chat_completion(ctx, request).await;
     let latency_ms = start.elapsed().as_millis() as i64;
 
@@ -345,22 +397,46 @@ pub async fn handle_chat_completions(
                 // ── Streaming: transform think tags in real-time ──
                 let status = resp.status();
                 let headers = resp.headers().clone();
-                let body = resp.into_body();
-                let stream = body.into_data_stream();
-                let mut filter = ThinkFilter::new();
 
-                let transformed = stream.map(move |result| {
-                    match result {
+                if let Some(config) = needs_think_filter(&upstream_model) {
+                    let body = resp.into_body();
+                    let stream = body.into_data_stream();
+                    let mut filter = ThinkFilter::new(config);
+
+                    let transformed = stream.map(move |result| match result {
                         Ok(chunk) => {
                             let out = filter.process_sse_chunk(&chunk);
                             Ok(out)
                         }
                         Err(e) => Err(e),
-                    }
-                });
+                    });
 
-                let new_body = Body::from_stream(transformed);
-                let mut response = Response::new(new_body);
+                    let new_body = Body::from_stream(transformed);
+                    let mut response = Response::new(new_body);
+                    *response.status_mut() = status;
+                    *response.headers_mut() = headers;
+
+                    if log_requests {
+                        let _ = log_request(
+                            &state,
+                            &original_model,
+                            &provider_id,
+                            &upstream_model,
+                            true,
+                            latency_ms,
+                            status_code,
+                            estimated_prompt,
+                            0,
+                            0.0,
+                            &request_body_str,
+                            "[streaming]",
+                        );
+                    }
+                    return response;
+                }
+
+                // No think-filter needed: pass through untouched
+                let mut response = Response::new(resp.into_body());
                 *response.status_mut() = status;
                 *response.headers_mut() = headers;
 
@@ -373,7 +449,7 @@ pub async fn handle_chat_completions(
                         true,
                         latency_ms,
                         status_code,
-                        0,
+                        estimated_prompt,
                         0,
                         0.0,
                         &request_body_str,
@@ -403,14 +479,20 @@ pub async fn handle_chat_completions(
                             "[error reading body]",
                         );
                     }
-                    return build_error_response(StatusCode::BAD_GATEWAY, "Failed to read upstream response");
+                    return build_error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "Failed to read upstream response",
+                    );
                 }
             };
 
             let response_body_str = String::from_utf8_lossy(&body_bytes).to_string();
-            let processed_body = strip_think_tags(&response_body_str);
+            let processed_body = match needs_think_filter(&upstream_model) {
+                Some(ref config) => strip_think_tags(&response_body_str, config),
+                None => response_body_str,
+            };
             let (prompt_tokens, completion_tokens, cost) =
-                extract_usage(&processed_body, input_price, output_price);
+                extract_usage(&processed_body, input_price, output_price, estimated_prompt);
 
             if log_requests {
                 let _ = log_request(
@@ -430,7 +512,8 @@ pub async fn handle_chat_completions(
             }
 
             let mut response = Response::new(Body::from(processed_body.into_bytes()));
-            *response.status_mut() = StatusCode::from_u16(status_code as u16).unwrap_or(StatusCode::OK);
+            *response.status_mut() =
+                StatusCode::from_u16(status_code as u16).unwrap_or(StatusCode::OK);
             response
         }
         Err(e) => {
@@ -451,10 +534,7 @@ pub async fn handle_chat_completions(
                     &e,
                 );
             }
-            build_error_response(
-                StatusCode::BAD_GATEWAY,
-                &format!("Upstream error: {}", e),
-            )
+            build_error_response(StatusCode::BAD_GATEWAY, &format!("Upstream error: {}", e))
         }
     }
 }
@@ -476,22 +556,129 @@ fn get_token(val: &serde_json::Value, keys: &[&str]) -> i64 {
     0
 }
 
-fn extract_usage(response_body: &str, input_price: f64, output_price: f64) -> (i64, i64, f64) {
+// ── Token estimation (heuristic, no external tokenizer) ─────────────────
+
+/// Estimate token count from raw text.
+/// Heuristic: mixed CJK/English ≈ chars / 2  (conservative).
+/// GCMP uses @microsoft/tiktokenizer (o200k_base).  When a Rust tiktoken
+/// equivalent is added, replace this with the real encoder.
+fn estimate_tokens(text: &str) -> i64 {
+    if text.is_empty() {
+        return 0;
+    }
+    let chars = text.chars().count() as i64;
+    // CJK chars ≈ 1–2 tokens, ASCII ≈ 0.25 tokens/char.
+    // chars/2 is a safe mixed-language lower bound.
+    (chars / 2).max(1)
+}
+
+/// Estimate prompt tokens from the request body.
+fn estimate_prompt_tokens(req: &ChatCompletionRequest) -> i64 {
+    let mut total = 0i64;
+    for msg in &req.messages {
+        // role overhead (≈ 3 tokens per message in ChatML-like formats)
+        total += 3;
+        if let Some(content) = &msg.content {
+            match content {
+                crate::protocol::openai_types::ChatContent::Text(t) => {
+                    total += estimate_tokens(t);
+                }
+                crate::protocol::openai_types::ChatContent::Parts(parts) => {
+                    for part in parts {
+                        match part {
+                            crate::protocol::openai_types::ContentPart::Text { text } => {
+                                total += estimate_tokens(text);
+                            }
+                            crate::protocol::openai_types::ContentPart::ImageUrl { .. } => {
+                                // Image placeholder — rough fixed cost
+                                total += 85;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(name) = &msg.name {
+            total += estimate_tokens(name);
+        }
+        if let Some(tool_calls) = &msg.tool_calls {
+            for tc in tool_calls {
+                total += estimate_tokens(&tc.function.name);
+                total += estimate_tokens(&tc.function.arguments);
+            }
+        }
+        if let Some(tool_call_id) = &msg.tool_call_id {
+            total += estimate_tokens(tool_call_id);
+        }
+    }
+    total
+}
+
+/// Estimate completion tokens from a non-streaming response body.
+fn estimate_completion_tokens(response_body: &str) -> i64 {
     let val = match serde_json::from_str::<serde_json::Value>(response_body) {
         Ok(v) => v,
-        Err(_) => return (0, 0, 0.0),
+        Err(_) => return 0,
+    };
+
+    // Try to sum content from all choices
+    let mut total = 0i64;
+    if let Some(choices) = val.get("choices").and_then(|c| c.as_array()) {
+        for choice in choices {
+            let content = choice
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+            total += estimate_tokens(content);
+
+            // Also count reasoning_content if present
+            let reasoning = choice
+                .get("message")
+                .and_then(|m| m.get("reasoning_content"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+            total += estimate_tokens(reasoning);
+        }
+    }
+    total
+}
+
+fn extract_usage(
+    response_body: &str,
+    input_price: f64,
+    output_price: f64,
+    estimated_prompt: i64,
+) -> (i64, i64, f64) {
+    let val = match serde_json::from_str::<serde_json::Value>(response_body) {
+        Ok(v) => v,
+        Err(_) => {
+            // JSON parse failed — fall back to text estimation
+            let completion = estimate_completion_tokens(response_body);
+            let cost = (estimated_prompt as f64 * input_price + completion as f64 * output_price)
+                / 1_000_000.0;
+            return (estimated_prompt, completion, cost);
+        }
     };
 
     let usage = val.get("usage").unwrap_or(&serde_json::Value::Null);
 
-    let prompt = get_token(usage, &["prompt_tokens", "input_tokens", "prompt", "input"]);
-    let completion = get_token(usage, &["completion_tokens", "output_tokens", "completion", "output"]);
+    let mut prompt = get_token(usage, &["prompt_tokens", "input_tokens", "prompt", "input"]);
+    let mut completion = get_token(
+        usage,
+        &["completion_tokens", "output_tokens", "completion", "output"],
+    );
+
+    // If upstream omitted usage entirely, fall back to estimation
+    if prompt == 0 && completion == 0 {
+        prompt = estimated_prompt;
+        completion = estimate_completion_tokens(response_body);
+    }
 
     // If prompt/completion are both 0, try to use total_tokens as a fallback hint
     let total = get_token(usage, &["total_tokens", "total"]);
 
     let (prompt, completion) = if prompt == 0 && completion == 0 && total > 0 {
-        // No breakdown available — assign all to prompt as conservative estimate
         (total, 0)
     } else {
         (prompt, completion)
@@ -537,8 +724,16 @@ fn log_request(
         prompt_tokens,
         completion_tokens,
         cost,
-        error_type: if status_code >= 400 { Some("upstream_error".to_string()) } else { None },
-        error_message: if status_code >= 400 { Some(response_body.to_string()) } else { None },
+        error_type: if status_code >= 400 {
+            Some("upstream_error".to_string())
+        } else {
+            None
+        },
+        error_message: if status_code >= 400 {
+            Some(response_body.to_string())
+        } else {
+            None
+        },
     };
 
     let _ = crate::logging::recorder::record_request_log(
