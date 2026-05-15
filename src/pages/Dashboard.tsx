@@ -11,6 +11,8 @@ import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
+import ListSubheader from '@mui/material/ListSubheader';
+import Divider from '@mui/material/Divider';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -172,11 +174,24 @@ export default function Dashboard() {
                       await updateConfig({ ...config, shadow_mapping_id: e.target.value });
                     }}
                   >
-                    {models.map((m) => (
-                      <MenuItem key={m.id} value={m.id}>
-                        {m.exposed_name} → {m.upstream_name}
-                      </MenuItem>
-                    ))}
+                    {providers
+                      .filter((p) => models.some((m) => m.provider_id === p.id))
+                      .map((provider, pIdx, filteredProviders) => {
+                        const providerModels = models.filter((m) => m.provider_id === provider.id);
+                        return [
+                          <ListSubheader key={`sub-${provider.id}`}>
+                            {provider.name}
+                          </ListSubheader>,
+                          ...providerModels.map((m) => (
+                            <MenuItem key={m.id} value={m.id} sx={{ pl: 3 }}>
+                              {m.upstream_name}
+                            </MenuItem>
+                          )),
+                          pIdx < filteredProviders.length - 1 && (
+                            <Divider key={`div-${provider.id}`} component="li" />
+                          ),
+                        ];
+                      })}
                   </Select>
                 </FormControl>
               )}

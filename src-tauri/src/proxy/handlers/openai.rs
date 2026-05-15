@@ -242,7 +242,7 @@ fn log_request(
     let _ = crate::stats::aggregator::record_usage(
         &mut conn,
         &date,
-        model,
+        upstream_model,
         provider_id,
         prompt_tokens,
         completion_tokens,

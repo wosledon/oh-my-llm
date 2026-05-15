@@ -35,6 +35,7 @@ interface LogItem {
   timestamp: number;
   protocol: string;
   model: string;
+  upstream_model?: string;
   provider_id?: string;
   stream: boolean;
   latency_ms: number;
@@ -168,7 +169,7 @@ export default function LogsPage() {
                       sx={{ cursor: 'pointer' }}
                     >
                       <TableCell>{formatTime(log.timestamp)}</TableCell>
-                      <TableCell>{log.model}</TableCell>
+                      <TableCell>{log.upstream_model || log.model}</TableCell>
                       <TableCell>{log.protocol}</TableCell>
                       <TableCell>{log.stream ? t.logs.streaming : t.logs.normal}</TableCell>
                       <TableCell>
@@ -205,7 +206,7 @@ export default function LogsPage() {
         <DialogContent dividers>
           {selectedLog && (
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {formatTime(selectedLog.timestamp)} &middot; {selectedLog.model} &middot; {selectedLog.protocol} &middot; {selectedLog.latency_ms}ms
+              {formatTime(selectedLog.timestamp)} &middot; {selectedLog.upstream_model || selectedLog.model} &middot; {selectedLog.protocol} &middot; {selectedLog.latency_ms}ms
             </Typography>
           )}
           <Tabs value={detailTab} onChange={(_, v) => setDetailTab(v)}>
