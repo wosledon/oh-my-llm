@@ -1,7 +1,10 @@
 use crate::protocol::anthropic_types::{
-    AnthropicMessage, AnthropicMessageContent, AnthropicRequest, AnthropicResponse, AnthropicSystem,
+    AnthropicContent, AnthropicContentBlock, AnthropicMessage, AnthropicMessageContent,
+    AnthropicRequest, AnthropicResponse, AnthropicSystem,
 };
-use crate::protocol::openai_types::{ChatCompletionRequest, ChatCompletionResponse, Choice, Usage};
+use crate::protocol::openai_types::{
+    ChatCompletionRequest, ChatCompletionResponse, Choice, ToolCall, Usage,
+};
 
 /// Convert OpenAI chat completion request to Anthropic messages request
 pub fn openai_to_anthropic(req: ChatCompletionRequest) -> AnthropicRequest {
@@ -13,28 +16,61 @@ pub fn openai_to_anthropic(req: ChatCompletionRequest) -> AnthropicRequest {
             if let Some(content) = extract_text(&msg.content) {
                 system_msg = Some(content);
             }
+        } else if msg.role == "tool" {
+            // OpenAI tool result → Anthropic tool_result block
+            let tool_use_id = msg.tool_call_id.clone().unwrap_or_default();
+            let content = extract_text(&msg.content).unwrap_or_default();
+            let block = AnthropicContentBlock::ToolResult {
+                tool_use_id,
+                content: serde_json::Value::String(content),
+            };
+            // Anthropic tool_result blocks must be inside a user message
+            // Check if previous message is user; if so merge, else push new user msg
+            if let Some(last) = anthropic_messages.last_mut() {
+                if last.role == "user" {
+                    if let AnthropicMessageContent::Blocks(ref mut blocks) = last.content {
+                        blocks.push(block);
+                    } else if let AnthropicMessageContent::Text(ref t) = last.content {
+                        let mut blocks = vec![AnthropicContentBlock::Text { text: t.clone() }];
+                        blocks.push(block);
+                        last.content = AnthropicMessageContent::Blocks(blocks);
+                    }
+                    continue;
+                }
+            }
+            anthropic_messages.push(AnthropicMessage {
+                role: "user".to_string(),
+                content: AnthropicMessageContent::Blocks(vec![block]),
+            });
         } else {
             let role = match msg.role.as_str() {
                 "assistant" => "assistant",
                 _ => "user",
             };
-            let mut blocks: Vec<crate::protocol::anthropic_types::AnthropicContentBlock> =
-                Vec::new();
+            let mut blocks: Vec<AnthropicContentBlock> = Vec::new();
             // thinking / reasoning_content → thinking block (must come first)
             if let Some(reasoning) = &msg.reasoning_content {
                 if !reasoning.is_empty() {
-                    blocks.push(
-                        crate::protocol::anthropic_types::AnthropicContentBlock::Thinking {
-                            thinking: reasoning.clone(),
-                            signature: String::new(),
-                        },
-                    );
+                    blocks.push(AnthropicContentBlock::Thinking {
+                        thinking: reasoning.clone(),
+                        signature: String::new(),
+                    });
+                }
+            }
+            // tool_calls → tool_use blocks
+            if let Some(ref calls) = msg.tool_calls {
+                for call in calls {
+                    let input = serde_json::from_str(&call.function.arguments)
+                        .unwrap_or(serde_json::Value::Null);
+                    blocks.push(AnthropicContentBlock::ToolUse {
+                        id: call.id.clone(),
+                        name: call.function.name.clone(),
+                        input,
+                    });
                 }
             }
             if let Some(content) = extract_text(&msg.content) {
-                blocks.push(
-                    crate::protocol::anthropic_types::AnthropicContentBlock::Text { text: content },
-                );
+                blocks.push(AnthropicContentBlock::Text { text: content });
             }
             if !blocks.is_empty() {
                 anthropic_messages.push(AnthropicMessage {
@@ -63,12 +99,35 @@ pub fn openai_to_anthropic(req: ChatCompletionRequest) -> AnthropicRequest {
 
 /// Convert Anthropic response to OpenAI chat completion response
 pub fn anthropic_to_openai(resp: AnthropicResponse) -> ChatCompletionResponse {
-    let content = resp
-        .content
-        .iter()
-        .filter_map(|c| c.text())
-        .collect::<Vec<_>>()
-        .join("");
+    let mut content_parts: Vec<String> = Vec::new();
+    let mut tool_calls: Vec<ToolCall> = Vec::new();
+    let mut reasoning_parts: Vec<String> = Vec::new();
+
+    for block in &resp.content {
+        match block {
+            AnthropicContent::Text { text } => content_parts.push(text.clone()),
+            AnthropicContent::Thinking { thinking, .. } => reasoning_parts.push(thinking.clone()),
+            AnthropicContent::ToolUse { id, name, input } => {
+                tool_calls.push(ToolCall {
+                    id: id.clone(),
+                    call_type: "function".to_string(),
+                    function: crate::protocol::openai_types::FunctionCall {
+                        name: name.clone(),
+                        arguments: input.to_string(),
+                    },
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let content = if content_parts.is_empty() {
+        None
+    } else {
+        Some(crate::protocol::openai_types::ChatContent::Text(
+            content_parts.join(""),
+        ))
+    };
 
     ChatCompletionResponse {
         id: resp.id,
@@ -81,9 +140,17 @@ pub fn anthropic_to_openai(resp: AnthropicResponse) -> ChatCompletionResponse {
             message: crate::protocol::openai_types::ChatMessage {
                 role: "assistant".to_string(),
                 name: None,
-                content: Some(crate::protocol::openai_types::ChatContent::Text(content)),
-                reasoning_content: None,
-                tool_calls: None,
+                content,
+                reasoning_content: if reasoning_parts.is_empty() {
+                    None
+                } else {
+                    Some(reasoning_parts.join(""))
+                },
+                tool_calls: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls)
+                },
                 tool_call_id: None,
             },
             logprobs: None,
@@ -115,25 +182,103 @@ pub fn anthropic_to_openai_request(req: AnthropicRequest) -> ChatCompletionReque
     }
 
     for msg in req.messages {
-        let text = msg.content.text();
-        let thinking = msg.content.thinking();
-        if !text.is_empty() || !thinking.is_empty() {
+        let mut text_parts: Vec<String> = Vec::new();
+        let mut thinking_parts: Vec<String> = Vec::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut tool_results: Vec<crate::protocol::openai_types::ChatMessage> = Vec::new();
+
+        if let AnthropicMessageContent::Blocks(ref blocks) = msg.content {
+            for block in blocks {
+                match block {
+                    AnthropicContentBlock::Text { text } => text_parts.push(text.clone()),
+                    AnthropicContentBlock::Thinking { thinking, .. } => {
+                        thinking_parts.push(thinking.clone())
+                    }
+                    AnthropicContentBlock::ToolUse { id, name, input } => {
+                        tool_calls.push(ToolCall {
+                            id: id.clone(),
+                            call_type: "function".to_string(),
+                            function: crate::protocol::openai_types::FunctionCall {
+                                name: name.clone(),
+                                arguments: input.to_string(),
+                            },
+                        });
+                    }
+                    AnthropicContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                    } => {
+                        let content_str = match content {
+                            serde_json::Value::String(s) => s.clone(),
+                            other => other.to_string(),
+                        };
+                        tool_results.push(crate::protocol::openai_types::ChatMessage {
+                            role: "tool".to_string(),
+                            name: None,
+                            content: Some(crate::protocol::openai_types::ChatContent::Text(
+                                content_str,
+                            )),
+                            reasoning_content: None,
+                            tool_calls: None,
+                            tool_call_id: Some(tool_use_id.clone()),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            let text = msg.content.text();
+            let thinking = msg.content.thinking();
+            if !text.is_empty() {
+                text_parts.push(text);
+            }
+            if !thinking.is_empty() {
+                thinking_parts.push(thinking);
+            }
+        }
+
+        // Assistant message with tool_calls
+        if msg.role == "assistant"
+            && (!text_parts.is_empty() || !thinking_parts.is_empty() || !tool_calls.is_empty())
+        {
             messages.push(crate::protocol::openai_types::ChatMessage {
-                role: msg.role,
+                role: "assistant".to_string(),
                 name: None,
-                content: if text.is_empty() {
+                content: if text_parts.is_empty() {
                     None
                 } else {
-                    Some(crate::protocol::openai_types::ChatContent::Text(text))
+                    Some(crate::protocol::openai_types::ChatContent::Text(
+                        text_parts.join(""),
+                    ))
                 },
-                reasoning_content: if thinking.is_empty() {
+                reasoning_content: if thinking_parts.is_empty() {
                     None
                 } else {
-                    Some(thinking)
+                    Some(thinking_parts.join(""))
                 },
-                tool_calls: None,
+                tool_calls: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls)
+                },
                 tool_call_id: None,
             });
+        }
+        // User message with text and/or tool_results
+        else if msg.role == "user" {
+            if !text_parts.is_empty() {
+                messages.push(crate::protocol::openai_types::ChatMessage {
+                    role: "user".to_string(),
+                    name: None,
+                    content: Some(crate::protocol::openai_types::ChatContent::Text(
+                        text_parts.join(""),
+                    )),
+                    reasoning_content: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+            }
+            messages.extend(tool_results);
         }
     }
 
@@ -186,6 +331,20 @@ pub fn openai_to_anthropic_response(resp: ChatCompletionResponse) -> AnthropicRe
                 signature: String::new(),
             },
         );
+    }
+    // tool_calls → Anthropic tool_use content blocks
+    if let Some(ref calls) = choice.message.tool_calls {
+        for call in calls {
+            let input =
+                serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
+            content.push(
+                crate::protocol::anthropic_types::AnthropicContent::ToolUse {
+                    id: call.id.clone(),
+                    name: call.function.name.clone(),
+                    input,
+                },
+            );
+        }
     }
     if !text_content.is_empty() {
         content

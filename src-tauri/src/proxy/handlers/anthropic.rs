@@ -184,6 +184,9 @@ pub async fn handle_anthropic_messages(
                     let mut sent_start = false;
                     let mut id = String::new();
                     let mut think_filter = crate::proxy::handlers::openai::ThinkFilter::new();
+                    let mut pending_tool_calls: Vec<crate::protocol::openai_types::ToolCall> =
+                        Vec::new();
+                    let mut tool_call_block_index: usize = 1; // text block is index 0
 
                     while let Some(chunk) = stream.next().await {
                         match chunk {
@@ -260,6 +263,7 @@ pub async fn handle_anthropic_messages(
                                                         }
 
                                                         if let Some(delta_obj) = delta {
+                                                            // content delta
                                                             if let Some(content) = delta_obj
                                                                 .get("content")
                                                                 .and_then(|c| c.as_str())
@@ -275,14 +279,68 @@ pub async fn handle_anthropic_messages(
                                                                     let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_delta\ndata: {}\n\n", delta)))).await;
                                                                 }
                                                             }
+
+                                                            // tool_calls delta — accumulate
+                                                            if let Some(tc_array) = delta_obj
+                                                                .get("tool_calls")
+                                                                .and_then(|c| c.as_array())
+                                                            {
+                                                                for tc in tc_array {
+                                                                    if let Ok(tool_call) = serde_json::from_value::<crate::protocol::openai_types::ToolCall>(tc.clone()) {
+                                                                        if let Some(existing) = pending_tool_calls.iter_mut().find(|t| t.id == tool_call.id) {
+                                                                            if !tool_call.function.name.is_empty() {
+                                                                                existing.function.name = tool_call.function.name.clone();
+                                                                            }
+                                                                            existing.function.arguments.push_str(&tool_call.function.arguments);
+                                                                        } else {
+                                                                            pending_tool_calls.push(tool_call);
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
                                                         }
 
                                                         if let Some(fr) = finish_reason {
+                                                            // close text block
                                                             let block_stop = serde_json::json!({
                                                                 "type": "content_block_stop",
                                                                 "index": 0
                                                             });
                                                             let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", block_stop)))).await;
+
+                                                            // emit accumulated tool_calls as tool_use blocks
+                                                            for call in &pending_tool_calls {
+                                                                let _input = serde_json::from_str(
+                                                                    &call.function.arguments,
+                                                                )
+                                                                .unwrap_or(serde_json::Value::Null);
+                                                                let t_start = serde_json::json!({
+                                                                    "type": "content_block_start",
+                                                                    "index": tool_call_block_index,
+                                                                    "content_block": {
+                                                                        "type": "tool_use",
+                                                                        "id": call.id,
+                                                                        "name": call.function.name,
+                                                                        "input": {}
+                                                                    }
+                                                                });
+                                                                let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_start\ndata: {}\n\n", t_start)))).await;
+                                                                let t_delta = serde_json::json!({
+                                                                    "type": "content_block_delta",
+                                                                    "index": tool_call_block_index,
+                                                                    "delta": {
+                                                                        "type": "input_json_delta",
+                                                                        "partial_json": call.function.arguments
+                                                                    }
+                                                                });
+                                                                let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_delta\ndata: {}\n\n", t_delta)))).await;
+                                                                let t_stop = serde_json::json!({
+                                                                    "type": "content_block_stop",
+                                                                    "index": tool_call_block_index
+                                                                });
+                                                                let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", t_stop)))).await;
+                                                                tool_call_block_index += 1;
+                                                            }
 
                                                             let stop_reason = if fr == "stop" {
                                                                 "end_turn"
