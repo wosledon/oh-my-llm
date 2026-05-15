@@ -5,143 +5,141 @@ use axum::extract::State;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 // ── Think tag filter (cross-chunk stateful) ──────────────────────────────
+// All OpenAI-compatible responses are filtered for `<think>...</think>` tags.
+// Models that use a different format should be handled upstream before reaching
+// this handler.
 
-#[derive(Clone)]
-struct ThinkTagConfig {
-    start: String,
-    end: String,
-}
-
-impl ThinkTagConfig {
-    fn think() -> Self {
-        Self {
-            start: "<think>".to_string(),
-            end: "</think>".to_string(),
-        }
-    }
-}
-
-/// Return a config if the upstream model is known to wrap reasoning in think tags.
-/// Models are matched by name heuristics.  Unmatched models pass through untouched.
-fn needs_think_filter(model_name: &str) -> Option<ThinkTagConfig> {
-    let name = model_name.to_lowercase();
-
-    // DeepSeek reasoning models (R1, Reasoner, V4)
-    if name.contains("deepseek")
-        && (name.contains("reasoner") || name.contains("r1") || name.contains("v4"))
-    {
-        return Some(ThinkTagConfig::think());
-    }
-
-    // Qwen QwQ series
-    if name.contains("qwq") || name.contains("qwen-qwq") {
-        return Some(ThinkTagConfig::think());
-    }
-
-    // Kimi / Moonshot K1 / reasoning variants
-    if name.contains("kimi") && (name.contains("k1") || name.contains("reasoning")) {
-        return Some(ThinkTagConfig::think());
-    }
-
-    // Xiaomi MiMo (GCMP reference)
-    if name.starts_with("mimo-") || name.contains("mimo-v") || name.contains("xiaomimimo") {
-        return Some(ThinkTagConfig::think());
-    }
-
-    // Generic fallback: any model id containing "reasoning" or "think"
-    if name.contains("reasoning") || name.contains("-think-") {
-        return Some(ThinkTagConfig::think());
-    }
-
-    None
-}
+const THINK_START: &str = "<think>";
+const THINK_END: &str = "</think>";
+const THINK_START_LEN: usize = 7;
+const THINK_END_LEN: usize = 8;
 
 struct ThinkFilter {
     pending: String,
+    /// State machine:
+    ///   false  → still looking for `<think>` at the head of the response
+    ///   true   → inside `<think>...</think>`, buffering reasoning
+    ///   done   → the first `</think>` has been closed; everything after is
+    ///            normal content and passes through untouched.
     in_think: bool,
+    done: bool,
     sse_buffer: String,
-    config: ThinkTagConfig,
-}
-
-/// Move prefix bytes from `s` to a new string, leaving at most `tail_len` bytes.
-/// Split point is guaranteed to be on a UTF-8 character boundary.
-fn drain_prefix(s: &mut String, tail_len: usize) -> String {
-    if s.len() <= tail_len {
-        return String::new();
-    }
-    let mut split = s.len() - tail_len;
-    while split > 0 && !s.is_char_boundary(split) {
-        split -= 1;
-    }
-    let prefix = s[..split].to_string();
-    *s = s[split..].to_string();
-    prefix
-}
-
-/// Return the tail of `s` with at most `tail_len` bytes, starting on a char boundary.
-fn safe_tail(s: &str, tail_len: usize) -> &str {
-    if s.len() <= tail_len {
-        return s;
-    }
-    let mut split = s.len() - tail_len;
-    while split > 0 && !s.is_char_boundary(split) {
-        split -= 1;
-    }
-    &s[split..]
+    /// Accumulated output characters (reasoning + visible content) for
+    /// token estimation.  Only meaningful in streaming mode.
+    output_chars: usize,
+    /// Shared counter for streaming completion-token estimate.
+    /// Written when [DONE] is processed.
+    completion_estimate: Option<Arc<AtomicI64>>,
 }
 
 impl ThinkFilter {
-    fn new(config: ThinkTagConfig) -> Self {
+    fn new() -> Self {
         Self {
             pending: String::new(),
             in_think: false,
+            done: false,
             sse_buffer: String::new(),
-            config,
+            output_chars: 0,
+            completion_estimate: None,
+        }
+    }
+
+    fn with_completion_counter(counter: Arc<AtomicI64>) -> Self {
+        let mut f = Self::new();
+        f.completion_estimate = Some(counter);
+        f
+    }
+
+    /// Convert accumulated output characters to a token estimate and write it
+    /// to the shared counter (if one was provided).
+    fn write_completion_estimate(&self) {
+        if let Some(counter) = &self.completion_estimate {
+            // chars / 2 is the same heuristic used by estimate_tokens().
+            let tokens = (self.output_chars / 2).max(1) as i64;
+            counter.store(tokens, Ordering::Relaxed);
         }
     }
 
     /// Process incoming text and return (reasoning_content, visible_content).
-    /// Handles think tags that may be split across multiple process() calls.
+    /// After the first `</think>` is seen the filter becomes a no-op.
     fn process(&mut self, text: &str) -> (String, String) {
+        if self.done {
+            self.output_chars += text.chars().count();
+            return (String::new(), text.to_string());
+        }
+
+        // Aggressive fast path: when we are not inside a think block and have
+        // no pending tail, look at the *start* of `text`.
+        if !self.in_think && self.pending.is_empty() {
+            let trimmed = text.trim_start();
+            if !trimmed.starts_with('<') {
+                // Definitely not a think tag — pass through untouched.
+                self.output_chars += text.chars().count();
+                return (String::new(), text.to_string());
+            }
+            // Starts with '<'.  If the text is long enough to rule out
+            // `<think>` and it is NOT `<think>`, pass through.
+            if trimmed.len() >= THINK_START_LEN && !trimmed.starts_with(THINK_START) {
+                self.output_chars += text.chars().count();
+                return (String::new(), text.to_string());
+            }
+            // If the text is short (< 7 chars) and NOT a prefix of `<think>`,
+            // it can never become a think tag — pass through.
+            if trimmed.len() < THINK_START_LEN && !THINK_START.starts_with(trimmed) {
+                self.output_chars += text.chars().count();
+                return (String::new(), text.to_string());
+            }
+            // Otherwise it might be `<think>` (or its prefix). Fall through to
+            // the state machine.
+        }
+
         self.pending.push_str(text);
         let mut reasoning = String::new();
         let mut content = String::new();
-        let start_len = self.config.start.len();
-        let end_len = self.config.end.len();
 
         loop {
             if self.in_think {
-                if let Some(pos) = self.pending.find(&self.config.end) {
+                if let Some(pos) = self.pending.find(THINK_END) {
                     reasoning.push_str(&self.pending[..pos]);
-                    self.pending = self.pending[pos + end_len..].to_string();
+                    self.pending.drain(..pos + THINK_END_LEN);
                     self.in_think = false;
+                    self.done = true; // think block closed → done forever
+                                      // Anything left in pending after </think> is visible content
+                                      // that belongs to the *same* SSE delta.
+                    content.push_str(&self.pending);
+                    self.output_chars += reasoning.chars().count() + content.chars().count();
+                    self.pending.clear();
+                    break;
                 } else {
-                    // Streaming: emit everything except the trailing bytes
-                    // that could be part of the end tag.  This keeps
-                    // reasoning_content flowing in real-time instead of
-                    // buffering until the tag is closed.
-                    if self.pending.len() > end_len {
-                        reasoning.push_str(&drain_prefix(&mut self.pending, end_len));
+                    // Streaming: emit everything except trailing bytes that
+                    // could be part of the end tag.
+                    if self.pending.len() > THINK_END_LEN {
+                        let split = self.pending.len() - THINK_END_LEN;
+                        let boundary = char_boundary(&self.pending, split);
+                        reasoning.push_str(&self.pending[..boundary]);
+                        self.pending.drain(..boundary);
                     }
                     break;
                 }
             } else {
-                if let Some(pos) = self.pending.find(&self.config.start) {
+                if let Some(pos) = self.pending.find(THINK_START) {
                     content.push_str(&self.pending[..pos]);
-                    self.pending = self.pending[pos + start_len..].to_string();
+                    self.pending.drain(..pos + THINK_START_LEN);
                     self.in_think = true;
                 } else {
-                    // Keep at most (start_len - 1) trailing chars.
-                    // If the first char of start tag is not in the tail,
-                    // it's safe to emit everything.
-                    let keep = start_len.saturating_sub(1);
-                    if self.pending.len() > keep {
-                        let first_char = self.config.start.chars().next().unwrap_or('<');
-                        if safe_tail(&self.pending, keep).contains(first_char) {
-                            content.push_str(&drain_prefix(&mut self.pending, keep));
+                    // Keep at most 6 trailing chars (<think> is 7).
+                    // If no '<' in the tail, safe to emit everything.
+                    if self.pending.len() > 6 {
+                        let split = self.pending.len() - 6;
+                        let boundary = char_boundary(&self.pending, split);
+                        if self.pending[boundary..].contains('<') {
+                            content.push_str(&self.pending[..boundary]);
+                            self.pending.drain(..boundary);
                         } else {
                             content.push_str(&self.pending);
                             self.pending.clear();
@@ -152,20 +150,27 @@ impl ThinkFilter {
             }
         }
 
+        self.output_chars += reasoning.chars().count() + content.chars().count();
         (reasoning, content)
     }
 
-    fn flush(self) -> (String, String) {
+    fn flush(self) -> (String, String, usize) {
+        let chars = self.pending.chars().count();
         if self.in_think {
-            (self.pending, String::new())
+            (self.pending, String::new(), chars)
         } else {
-            (String::new(), self.pending)
+            (String::new(), self.pending, chars)
         }
     }
 
     /// Consume one raw SSE chunk, parse complete events, filter think tags,
     /// and return the transformed bytes. Incomplete events are kept in `sse_buffer`.
     fn process_sse_chunk(&mut self, chunk: &bytes::Bytes) -> bytes::Bytes {
+        // Once filtering is finished, avoid all SSE parsing and forward raw.
+        if self.done && self.sse_buffer.is_empty() {
+            return chunk.clone();
+        }
+
         let text = String::from_utf8_lossy(chunk);
         self.sse_buffer.push_str(&text);
         let mut output = Vec::new();
@@ -174,23 +179,24 @@ impl ThinkFilter {
             let event = self.sse_buffer[..pos].to_string();
             self.sse_buffer = self.sse_buffer[pos + 2..].to_string();
 
-            let mut data_line: Option<String> = None;
-            let mut other_lines: Vec<String> = Vec::new();
+            let mut data_line: Option<&str> = None;
+            let mut other_lines: Vec<&str> = Vec::new();
             for line in event.lines() {
                 if line.starts_with("data: ") {
-                    data_line = Some(line[6..].to_string());
+                    data_line = Some(&line[6..]);
                 } else {
-                    other_lines.push(line.to_string());
+                    other_lines.push(line);
                 }
             }
 
             if let Some(data) = data_line {
                 if data == "[DONE]" {
                     // flush any remaining reasoning before DONE
-                    let (final_reasoning, final_content) = {
-                        let f = std::mem::replace(self, ThinkFilter::new(self.config.clone()));
+                    let (final_reasoning, final_content, remaining_chars) = {
+                        let f = std::mem::replace(self, ThinkFilter::new());
                         f.flush()
                     };
+                    self.output_chars += remaining_chars;
                     if !final_reasoning.is_empty() || !final_content.is_empty() {
                         let mut flush_json = serde_json::json!({
                             "choices": [{"index":0,"delta":{},"finish_reason":null}]
@@ -203,23 +209,37 @@ impl ThinkFilter {
                             flush_json["choices"][0]["delta"]["content"] =
                                 serde_json::Value::String(final_content);
                         }
+                        output.extend_from_slice(b"data: ");
                         output.extend_from_slice(
-                            format!(
-                                "data: {}\n",
-                                serde_json::to_string(&flush_json).unwrap_or_default()
-                            )
-                            .as_bytes(),
+                            serde_json::to_string(&flush_json)
+                                .unwrap_or_default()
+                                .as_bytes(),
                         );
+                        output.extend_from_slice(b"\n");
                         for line in &other_lines {
-                            output.extend_from_slice(format!("\n{}", line).as_bytes());
+                            output.extend_from_slice(line.as_bytes());
+                            output.push(b'\n');
                         }
-                        output.extend_from_slice(b"\n\n");
+                        output.extend_from_slice(b"\n");
                     }
+                    self.write_completion_estimate();
                     output.extend_from_slice(b"data: [DONE]\n\n");
                     continue;
                 }
 
-                if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&data) {
+                // Fast path: filter already finished → forward raw data line
+                if self.done {
+                    output.extend_from_slice(b"data: ");
+                    output.extend_from_slice(data.as_bytes());
+                    for line in &other_lines {
+                        output.push(b'\n');
+                        output.extend_from_slice(line.as_bytes());
+                    }
+                    output.extend_from_slice(b"\n\n");
+                    continue;
+                }
+
+                if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(data) {
                     if let Some(content) = json
                         .pointer("/choices/0/delta/content")
                         .and_then(|c| c.as_str())
@@ -238,12 +258,13 @@ impl ThinkFilter {
                                 serde_json::Value::String(new_content);
                         }
                     }
+                    output.extend_from_slice(b"data: ");
                     output.extend_from_slice(
-                        format!("data: {}", serde_json::to_string(&json).unwrap_or_default())
-                            .as_bytes(),
+                        serde_json::to_string(&json).unwrap_or_default().as_bytes(),
                     );
                     for line in &other_lines {
-                        output.extend_from_slice(format!("\n{}", line).as_bytes());
+                        output.push(b'\n');
+                        output.extend_from_slice(line.as_bytes());
                     }
                     output.extend_from_slice(b"\n\n");
                 } else {
@@ -256,19 +277,41 @@ impl ThinkFilter {
             }
         }
 
+        // If filter is done and buffer is empty, remaining raw bytes can be forwarded.
+        if self.done && self.sse_buffer.is_empty() {
+            let extra = chunk.len().saturating_sub(output.len());
+            if extra > 0 {
+                // This shouldn't normally happen because we process complete events,
+                // but as a safety net append any trailing raw bytes.
+                output.extend_from_slice(&chunk[chunk.len() - extra..]);
+            }
+        }
+
         bytes::Bytes::from(output)
     }
 }
 
-/// Strip think tags from non-stream JSON response and move it to `reasoning_content`.
-fn strip_think_tags(body: &str, config: &ThinkTagConfig) -> String {
+/// Largest index ≤ `byte_idx` that is a char boundary.
+#[inline]
+fn char_boundary(s: &str, byte_idx: usize) -> usize {
+    let mut i = byte_idx;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Strip `<think>...</think>` from non-stream JSON response and move it to `reasoning_content`.
+fn strip_think_tags(body: &str) -> String {
+    // Fast path: no think tags at all
+    if !body.contains(THINK_START) {
+        return body.to_string();
+    }
+
     let mut val: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(_) => return body.to_string(),
     };
-
-    let start_len = config.start.len();
-    let end_len = config.end.len();
 
     if let Some(choices) = val.get_mut("choices").and_then(|c| c.as_array_mut()) {
         for choice in choices {
@@ -278,11 +321,11 @@ fn strip_think_tags(body: &str, config: &ThinkTagConfig) -> String {
                     .and_then(|c| c.as_str())
                     .map(|s| s.to_string());
                 if let Some(content_str) = content_str {
-                    if let Some(start) = content_str.find(&config.start) {
-                        if let Some(end) = content_str.find(&config.end) {
+                    if let Some(start) = content_str.find(THINK_START) {
+                        if let Some(end) = content_str.find(THINK_END) {
                             let before = content_str[..start].trim_end();
-                            let think = content_str[start + start_len..end].trim();
-                            let after = content_str[end + end_len..].trim_start();
+                            let think = content_str[start + THINK_START_LEN..end].trim();
+                            let after = content_str[end + THINK_END_LEN..].trim_start();
                             let new_content = format!("{}{}", before, after);
                             msg["content"] = serde_json::Value::String(new_content);
                             if !think.is_empty() {
@@ -394,31 +437,52 @@ pub async fn handle_chat_completions(
             let request_body_str = String::from_utf8_lossy(&bytes).to_string();
 
             if is_stream {
-                // ── Streaming: transform think tags in real-time ──
+                // ── Streaming: always filter think tags ──
                 let status = resp.status();
                 let headers = resp.headers().clone();
+                let body = resp.into_body();
+                let stream = body.into_data_stream();
+                let completion_estimate = Arc::new(AtomicI64::new(0));
+                let completion_clone = completion_estimate.clone();
+                let mut filter = ThinkFilter::with_completion_counter(completion_clone);
 
-                if let Some(config) = needs_think_filter(&upstream_model) {
-                    let body = resp.into_body();
-                    let stream = body.into_data_stream();
-                    let mut filter = ThinkFilter::new(config);
+                let transformed = stream.map(move |result| match result {
+                    Ok(chunk) => {
+                        let out = filter.process_sse_chunk(&chunk);
+                        Ok(out)
+                    }
+                    Err(e) => Err(e),
+                });
 
-                    let transformed = stream.map(move |result| match result {
-                        Ok(chunk) => {
-                            let out = filter.process_sse_chunk(&chunk);
-                            Ok(out)
+                let new_body = Body::from_stream(transformed);
+                let mut response = Response::new(new_body);
+                *response.status_mut() = status;
+                *response.headers_mut() = headers;
+
+                if log_requests {
+                    // Stream is lazy — log after it finishes via a background task.
+                    let state_clone = state.clone();
+                    let completion_clone = completion_estimate.clone();
+                    let original_model = original_model.clone();
+                    let provider_id = provider_id.clone();
+                    let upstream_model = upstream_model.clone();
+                    let request_body_str = request_body_str.clone();
+                    tokio::spawn(async move {
+                        // Poll every second for up to 120 s until the stream writes
+                        // its completion estimate (or we give up).
+                        let mut completion = 0i64;
+                        for _ in 0..120 {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            completion = completion_clone.load(Ordering::Relaxed);
+                            if completion > 0 {
+                                break;
+                            }
                         }
-                        Err(e) => Err(e),
-                    });
-
-                    let new_body = Body::from_stream(transformed);
-                    let mut response = Response::new(new_body);
-                    *response.status_mut() = status;
-                    *response.headers_mut() = headers;
-
-                    if log_requests {
+                        let cost = (estimated_prompt as f64 * input_price
+                            + completion as f64 * output_price)
+                            / 1_000_000.0;
                         let _ = log_request(
-                            &state,
+                            &state_clone,
                             &original_model,
                             &provider_id,
                             &upstream_model,
@@ -426,35 +490,12 @@ pub async fn handle_chat_completions(
                             latency_ms,
                             status_code,
                             estimated_prompt,
-                            0,
-                            0.0,
+                            completion,
+                            cost,
                             &request_body_str,
                             "[streaming]",
                         );
-                    }
-                    return response;
-                }
-
-                // No think-filter needed: pass through untouched
-                let mut response = Response::new(resp.into_body());
-                *response.status_mut() = status;
-                *response.headers_mut() = headers;
-
-                if log_requests {
-                    let _ = log_request(
-                        &state,
-                        &original_model,
-                        &provider_id,
-                        &upstream_model,
-                        true,
-                        latency_ms,
-                        status_code,
-                        estimated_prompt,
-                        0,
-                        0.0,
-                        &request_body_str,
-                        "[streaming]",
-                    );
+                    });
                 }
                 return response;
             }
@@ -487,10 +528,7 @@ pub async fn handle_chat_completions(
             };
 
             let response_body_str = String::from_utf8_lossy(&body_bytes).to_string();
-            let processed_body = match needs_think_filter(&upstream_model) {
-                Some(ref config) => strip_think_tags(&response_body_str, config),
-                None => response_body_str,
-            };
+            let processed_body = strip_think_tags(&response_body_str);
             let (prompt_tokens, completion_tokens, cost) =
                 extract_usage(&processed_body, input_price, output_price, estimated_prompt);
 

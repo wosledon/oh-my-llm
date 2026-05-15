@@ -29,6 +29,7 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
+import { formatCompact, formatCost } from '../utils/formatNumber';
 
 interface LogItem {
   id: string;
@@ -200,8 +201,8 @@ export default function LogsPage() {
                         )}
                       </TableCell>
                       <TableCell>{log.latency_ms}ms</TableCell>
-                      <TableCell>{log.prompt_tokens} &rarr; {log.completion_tokens}</TableCell>
-                      <TableCell>${log.cost.toFixed(4)}</TableCell>
+                      <TableCell>{formatCompact(log.prompt_tokens)} &rarr; {formatCompact(log.completion_tokens)}</TableCell>
+                      <TableCell>{formatCost(log.cost)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

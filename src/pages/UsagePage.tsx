@@ -12,6 +12,7 @@ import Box from '@mui/material/Box';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
+import { formatCompact, formatCost } from '../utils/formatNumber';
 
 interface DailyUsage {
   date: string;
@@ -128,19 +129,19 @@ export default function UsagePage() {
             </Card>
             <Card variant="outlined" sx={{ borderRadius: 2 }}>
               <CardContent>
-                <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{summary.total_prompt_tokens.toLocaleString()}</Typography>
+                <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{formatCompact(summary.total_prompt_tokens)}</Typography>
                 <Typography variant="caption" color="text.secondary">{t.usage.totalPromptTokens}</Typography>
               </CardContent>
             </Card>
             <Card variant="outlined" sx={{ borderRadius: 2 }}>
               <CardContent>
-                <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{summary.total_completion_tokens.toLocaleString()}</Typography>
+                <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{formatCompact(summary.total_completion_tokens)}</Typography>
                 <Typography variant="caption" color="text.secondary">{t.usage.totalCompletionTokens}</Typography>
               </CardContent>
             </Card>
             <Card variant="outlined" sx={{ borderRadius: 2 }}>
               <CardContent>
-                <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>${summary.total_cost.toFixed(4)}</Typography>
+                <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{formatCost(summary.total_cost)}</Typography>
                 <Typography variant="caption" color="text.secondary">{t.usage.totalCost}</Typography>
               </CardContent>
             </Card>
@@ -168,9 +169,9 @@ export default function UsagePage() {
                     <TableCell>{item.date}</TableCell>
                     <TableCell>{item.model}</TableCell>
                     <TableCell>{item.request_count}</TableCell>
-                    <TableCell>{item.prompt_tokens.toLocaleString()}</TableCell>
-                    <TableCell>{item.completion_tokens.toLocaleString()}</TableCell>
-                    <TableCell>${item.cost.toFixed(4)}</TableCell>
+                    <TableCell>{formatCompact(item.prompt_tokens)}</TableCell>
+                    <TableCell>{formatCompact(item.completion_tokens)}</TableCell>
+                    <TableCell>{formatCost(item.cost)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
