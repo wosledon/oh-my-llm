@@ -31,6 +31,11 @@ export const en: Translation = {
     copied: 'Copied',
     shadowModel: 'Shadow Model',
     shadowModelSwitch: 'Shadow Model Toggle',
+    protocols: 'Protocols',
+    active: 'Active',
+    inactive: 'Inactive',
+    enabledCount: 'enabled',
+    shadowModelSelectLabel: 'Map to Model',
   },
   providers: {
     title: 'Providers',

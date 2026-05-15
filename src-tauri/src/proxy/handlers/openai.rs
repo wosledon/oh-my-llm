@@ -180,16 +180,47 @@ pub async fn handle_chat_completions(
     }
 }
 
-fn extract_usage(response_body: &str, _provider_id: &str, _upstream_model: String) -> (i64, i64, f64) {
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(response_body) {
-        let prompt = val.get("usage").and_then(|u| u.get("prompt_tokens")).and_then(|t| t.as_i64()).unwrap_or(0);
-        let completion = val.get("usage").and_then(|u| u.get("completion_tokens")).and_then(|t| t.as_i64()).unwrap_or(0);
-        // Simple cost estimation: assume $2 / 1M tokens for input, $6 / 1M for output if no price config
-        let cost = (prompt as f64 * 2.0 + completion as f64 * 6.0) / 1_000_000.0;
-        (prompt, completion, cost)
-    } else {
-        (0, 0, 0.0)
+fn get_token(val: &serde_json::Value, keys: &[&str]) -> i64 {
+    for key in keys {
+        if let Some(v) = val.get(key) {
+            if let Some(n) = v.as_i64() {
+                return n;
+            }
+            if let Some(n) = v.as_u64() {
+                return n as i64;
+            }
+            if let Some(n) = v.as_f64() {
+                return n as i64;
+            }
+        }
     }
+    0
+}
+
+fn extract_usage(response_body: &str, _provider_id: &str, _upstream_model: String) -> (i64, i64, f64) {
+    let val = match serde_json::from_str::<serde_json::Value>(response_body) {
+        Ok(v) => v,
+        Err(_) => return (0, 0, 0.0),
+    };
+
+    let usage = val.get("usage").unwrap_or(&serde_json::Value::Null);
+
+    let prompt = get_token(usage, &["prompt_tokens", "input_tokens", "prompt", "input"]);
+    let completion = get_token(usage, &["completion_tokens", "output_tokens", "completion", "output"]);
+
+    // If prompt/completion are both 0, try to use total_tokens as a fallback hint
+    let total = get_token(usage, &["total_tokens", "total"]);
+
+    let (prompt, completion) = if prompt == 0 && completion == 0 && total > 0 {
+        // No breakdown available — assign all to prompt as conservative estimate
+        (total, 0)
+    } else {
+        (prompt, completion)
+    };
+
+    // Simple cost estimation: assume $2 / 1M tokens for input, $6 / 1M for output if no price config
+    let cost = (prompt as f64 * 2.0 + completion as f64 * 6.0) / 1_000_000.0;
+    (prompt, completion, cost)
 }
 
 fn log_request(

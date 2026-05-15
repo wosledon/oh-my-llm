@@ -86,8 +86,8 @@ export default function ModelsPage() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" sx={{ fontWeight: 600 }}>{t.models.title}</Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, letterSpacing: -0.5 }}>{t.models.title}</Typography>
         <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd}>
           {t.models.addModel}
         </Button>
@@ -95,11 +95,11 @@ export default function ModelsPage() {
 
       {loading && <CircularProgress sx={{ display: 'block', mx: 'auto', my: 4 }} />}
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>{t.common.error}: {error}</Alert>
+        <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{t.common.error}: {error}</Alert>
       )}
 
-      <Dialog open={open} onClose={() => { setOpen(false); resetForm(); }} maxWidth="sm" fullWidth>
-        <DialogTitle>{editingId ? t.models.editModel : t.models.addModel}</DialogTitle>
+      <Dialog open={open} onClose={() => { setOpen(false); resetForm(); }} maxWidth="sm" fullWidth slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
+        <DialogTitle sx={{ fontWeight: 700 }}>{editingId ? t.models.editModel : t.models.addModel}</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
           <FormControl fullWidth>
             <InputLabel>{t.models.provider}</InputLabel>
@@ -157,22 +157,22 @@ export default function ModelsPage() {
         </DialogActions>
       </Dialog>
 
-      <Card variant="outlined" sx={{ borderRadius: 2 }}>
+      <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
         <Table>
           <TableHead>
-            <TableRow>
-              <TableCell>{t.models.exposedName}</TableCell>
-              <TableCell>{t.models.upstreamName}</TableCell>
-              <TableCell>{t.models.provider}</TableCell>
-              <TableCell>{t.models.enabled}</TableCell>
-              <TableCell>{t.models.inputPrice}</TableCell>
-              <TableCell>{t.models.outputPrice}</TableCell>
-              <TableCell align="right">{t.models.actions}</TableCell>
+            <TableRow sx={{ bgcolor: 'action.hover' }}>
+              <TableCell sx={{ fontWeight: 700 }}>{t.models.exposedName}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t.models.upstreamName}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t.models.provider}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t.models.enabled}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t.models.inputPrice}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t.models.outputPrice}</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700 }}>{t.models.actions}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {models.map((m) => (
-              <TableRow key={m.id} hover>
+              <TableRow key={m.id} hover sx={{ '&:last-child td': { borderBottom: 0 } }}>
                 <TableCell sx={{ fontWeight: 600 }}>{m.exposed_name}</TableCell>
                 <TableCell sx={{ fontFamily: 'monospace', fontSize: '12px' }}>{m.upstream_name}</TableCell>
                 <TableCell>{providers.find((p) => p.id === m.provider_id)?.name || m.provider_id}</TableCell>
@@ -193,7 +193,7 @@ export default function ModelsPage() {
             ))}
             {models.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={7} align="center" sx={{ py: 8, color: 'text.secondary' }}>
                   {t.dashboard.noData}
                 </TableCell>
               </TableRow>

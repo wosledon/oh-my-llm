@@ -29,6 +29,11 @@ export interface Translation {
     copied: string;
     shadowModel: string;
     shadowModelSwitch: string;
+    protocols: string;
+    active: string;
+    inactive: string;
+    enabledCount: string;
+    shadowModelSelectLabel: string;
   };
   providers: {
     title: string;
@@ -158,6 +163,11 @@ export const zh: Translation = {
     copied: '已复制',
     shadowModel: '影子模型',
     shadowModelSwitch: '影子模型开关',
+    protocols: '协议',
+    active: '已启用',
+    inactive: '未启用',
+    enabledCount: '个已启用',
+    shadowModelSelectLabel: '映射模型',
   },
   providers: {
     title: '供应商',

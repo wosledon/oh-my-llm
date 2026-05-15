@@ -13,6 +13,7 @@ import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import ListSubheader from '@mui/material/ListSubheader';
 import Divider from '@mui/material/Divider';
+import { alpha } from '@mui/material/styles';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -54,33 +55,45 @@ export default function Dashboard() {
 
   const enabledModels = models.filter((m) => m.enabled).length;
 
+  const iconBg = (paletteKey: 'success' | 'error' | 'primary' | 'info' | 'warning' | 'secondary') => ({
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 36,
+    height: 36,
+    borderRadius: 1.5,
+    bgcolor: (theme: any) => alpha(theme.palette[paletteKey].main, 0.12),
+    color: (theme: any) => theme.palette[paletteKey].main,
+  });
+
   return (
     <Box>
-      <Typography variant="h4" sx={{ fontWeight: 600, mb: 3 }}>
+      <Typography variant="h4" sx={{ fontWeight: 700, mb: 3, letterSpacing: -0.5 }}>
         {t.dashboard.title}
       </Typography>
 
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-          gap: 3,
+          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' },
+          gap: 2.5,
         }}
       >
         {/* Proxy Status Card */}
-        <Card variant="outlined" sx={{ borderRadius: 2 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <Typography color="text.secondary" sx={{ fontWeight: 500 }}>
-                {t.dashboard.proxyStatus}
-              </Typography>
+        <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+          <CardContent sx={{ p: 2.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={iconBg(running ? 'success' : 'error')}>
+                {running ? <StopIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />}
+              </Box>
               <Chip
                 size="small"
                 color={running ? 'success' : 'error'}
                 label={running ? t.dashboard.running : t.dashboard.stopped}
+                sx={{ fontWeight: 600 }}
               />
             </Box>
-            <Typography variant="h3" sx={{ fontWeight: 700, mt: 2 }}>
+            <Typography variant="h4" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
               {config ? `${config.port}` : '--'}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -88,11 +101,12 @@ export default function Dashboard() {
             </Typography>
             <Box sx={{ mt: 2 }}>
               <Button
-                variant="contained"
+                variant={running ? 'outlined' : 'contained'}
                 size="small"
                 startIcon={running ? <StopIcon /> : <PlayArrowIcon />}
-                color={running ? 'inherit' : 'primary'}
+                color={running ? 'error' : 'primary'}
                 onClick={running ? stopProxy : startProxy}
+                fullWidth
               >
                 {running ? t.dashboard.stop : t.dashboard.start}
               </Button>
@@ -101,19 +115,21 @@ export default function Dashboard() {
         </Card>
 
         {/* Proxy Address Card */}
-        <Card variant="outlined" sx={{ borderRadius: 2 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <Typography color="text.secondary" sx={{ fontWeight: 500 }}>
-                {t.dashboard.proxyAddress}
-              </Typography>
-              <OpenInNewIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+        <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+          <CardContent sx={{ p: 2.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={iconBg('primary')}>
+                <OpenInNewIcon fontSize="small" />
+              </Box>
             </Box>
             <Typography
-              variant="h6"
-              sx={{ fontWeight: 600, mt: 2, fontFamily: 'monospace', wordBreak: 'break-all' }}
+              variant="body1"
+              sx={{ fontWeight: 600, fontFamily: 'monospace', wordBreak: 'break-all', lineHeight: 1.4 }}
             >
               {proxyAddress || '--'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {t.dashboard.proxyAddress}
             </Typography>
             <Box sx={{ mt: 2 }}>
               <Button
@@ -122,6 +138,7 @@ export default function Dashboard() {
                 startIcon={copied ? <CheckIcon /> : <ContentCopyIcon />}
                 onClick={handleCopy}
                 disabled={!proxyAddress}
+                fullWidth
               >
                 {copied ? t.dashboard.copied : t.dashboard.copyAddress}
               </Button>
@@ -130,16 +147,18 @@ export default function Dashboard() {
         </Card>
 
         {/* Shadow Model Card */}
-        <Card variant="outlined" sx={{ borderRadius: 2 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <Typography color="text.secondary" sx={{ fontWeight: 500 }}>
-                {t.dashboard.shadowModel}
-              </Typography>
-              <ViewInArIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+        <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+          <CardContent sx={{ p: 2.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={iconBg('info')}>
+                <ViewInArIcon fontSize="small" />
+              </Box>
             </Box>
-            <Typography variant="h5" sx={{ fontWeight: 600, mt: 2, fontFamily: 'monospace' }}>
+            <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.3 }}>
               {config?.shadow_model_name || '--'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {t.dashboard.shadowModel}
             </Typography>
             <Box sx={{ mt: 2 }}>
               <FormControlLabel
@@ -164,14 +183,26 @@ export default function Dashboard() {
                 }
               />
               {!!config?.shadow_mapping_id && (
-                <FormControl fullWidth size="small" sx={{ mt: 1.5 }}>
-                  <InputLabel>映射模型</InputLabel>
+                <FormControl fullWidth size="small" sx={{ mt: 1 }}>
+                  <InputLabel>{t.dashboard.shadowModelSelectLabel}</InputLabel>
                   <Select
                     value={config.shadow_mapping_id}
-                    label="映射模型"
+                    label={t.dashboard.shadowModelSelectLabel}
                     onChange={async (e) => {
                       if (!config) return;
                       await updateConfig({ ...config, shadow_mapping_id: e.target.value });
+                    }}
+                    MenuProps={{
+                      slotProps: {
+                        paper: {
+                          sx: {
+                            mt: 1,
+                            borderRadius: 2,
+                            boxShadow: (theme) => theme.shadows[8],
+                            minWidth: 260,
+                          },
+                        },
+                      },
                     }}
                   >
                     {providers
@@ -179,7 +210,7 @@ export default function Dashboard() {
                       .map((provider, pIdx, filteredProviders) => {
                         const providerModels = models.filter((m) => m.provider_id === provider.id);
                         return [
-                          <ListSubheader key={`sub-${provider.id}`}>
+                          <ListSubheader key={`sub-${provider.id}`} sx={{ fontWeight: 700, bgcolor: 'background.paper' }}>
                             {provider.name}
                           </ListSubheader>,
                           ...providerModels.map((m) => (
@@ -200,15 +231,14 @@ export default function Dashboard() {
         </Card>
 
         {/* Providers Card */}
-        <Card variant="outlined" sx={{ borderRadius: 2 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <Typography color="text.secondary" sx={{ fontWeight: 500 }}>
-                {t.dashboard.providers}
-              </Typography>
-              <DnsIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+        <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+          <CardContent sx={{ p: 2.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={iconBg('warning')}>
+                <DnsIcon fontSize="small" />
+              </Box>
             </Box>
-            <Typography variant="h3" sx={{ fontWeight: 700, mt: 2 }}>
+            <Typography variant="h4" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
               {providers.length}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
@@ -218,46 +248,50 @@ export default function Dashboard() {
         </Card>
 
         {/* Models Card */}
-        <Card variant="outlined" sx={{ borderRadius: 2 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <Typography color="text.secondary" sx={{ fontWeight: 500 }}>
-                {t.dashboard.models}
-              </Typography>
-              <ViewInArIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+        <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+          <CardContent sx={{ p: 2.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={iconBg('secondary')}>
+                <ViewInArIcon fontSize="small" />
+              </Box>
             </Box>
-            <Typography variant="h3" sx={{ fontWeight: 700, mt: 2 }}>
+            <Typography variant="h4" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
               {models.length}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              {enabledModels} enabled
+              {enabledModels}{t.dashboard.enabledCount}
             </Typography>
           </CardContent>
         </Card>
 
         {/* Protocols Card */}
-        <Card variant="outlined" sx={{ borderRadius: 2 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <Typography color="text.secondary" sx={{ fontWeight: 500 }}>
-                Protocols
-              </Typography>
-              <SettingsIcon fontSize="small" sx={{ color: 'text.secondary' }} />
+        <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+          <CardContent sx={{ p: 2.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={iconBg('success')}>
+                <SettingsIcon fontSize="small" />
+              </Box>
             </Box>
-            <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
               <Chip
                 size="small"
+                variant={config?.openai_enabled ? 'filled' : 'outlined'}
                 color={config?.openai_enabled ? 'success' : 'default'}
                 label="OpenAI"
+                sx={{ fontWeight: 600 }}
               />
               <Chip
                 size="small"
+                variant={config?.anthropic_enabled ? 'filled' : 'outlined'}
                 color={config?.anthropic_enabled ? 'success' : 'default'}
                 label="Anthropic"
+                sx={{ fontWeight: 600 }}
               />
             </Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              {config?.openai_enabled || config?.anthropic_enabled ? 'Active' : 'Inactive'}
+            <Typography variant="body2" color="text.secondary">
+              {config?.openai_enabled || config?.anthropic_enabled
+                ? t.dashboard.active
+                : t.dashboard.inactive}
             </Typography>
           </CardContent>
         </Card>

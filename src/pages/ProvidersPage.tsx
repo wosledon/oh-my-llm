@@ -81,8 +81,8 @@ export default function ProvidersPage() {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" sx={{ fontWeight: 600 }}>{t.providers.title}</Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, letterSpacing: -0.5 }}>{t.providers.title}</Typography>
         <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenAdd}>
           {t.providers.addProvider}
         </Button>
@@ -90,11 +90,11 @@ export default function ProvidersPage() {
 
       {loading && <CircularProgress sx={{ display: 'block', mx: 'auto', my: 4 }} />}
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>{t.common.error}: {error}</Alert>
+        <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{t.common.error}: {error}</Alert>
       )}
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{editingId ? t.providers.editProvider : t.providers.addProvider}</DialogTitle>
+      <Dialog open={open} onClose={() => { setOpen(false); resetForm(); }} maxWidth="sm" fullWidth slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
+        <DialogTitle sx={{ fontWeight: 700 }}>{editingId ? t.providers.editProvider : t.providers.addProvider}</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
           <TextField
             label={t.providers.name}
@@ -143,20 +143,20 @@ export default function ProvidersPage() {
         </DialogActions>
       </Dialog>
 
-      <Card variant="outlined" sx={{ borderRadius: 2 }}>
+      <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
         <Table>
           <TableHead>
-            <TableRow>
-              <TableCell>{t.providers.name}</TableCell>
-              <TableCell>{t.providers.type}</TableCell>
-              <TableCell>{t.providers.baseUrl}</TableCell>
-              <TableCell>{t.providers.apiKey}</TableCell>
-              <TableCell align="right">{t.providers.actions}</TableCell>
+            <TableRow sx={{ bgcolor: 'action.hover' }}>
+              <TableCell sx={{ fontWeight: 700 }}>{t.providers.name}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t.providers.type}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t.providers.baseUrl}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t.providers.apiKey}</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700 }}>{t.providers.actions}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {providers.map((p) => (
-              <TableRow key={p.id} hover>
+              <TableRow key={p.id} hover sx={{ '&:last-child td': { borderBottom: 0 } }}>
                 <TableCell sx={{ fontWeight: 600 }}>{p.name}</TableCell>
                 <TableCell>
                   <Chip size="small" variant="outlined" label={p.prov_type} />
@@ -175,7 +175,7 @@ export default function ProvidersPage() {
             ))}
             {providers.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={5} align="center" sx={{ py: 8, color: 'text.secondary' }}>
                   {t.dashboard.noData}
                 </TableCell>
               </TableRow>

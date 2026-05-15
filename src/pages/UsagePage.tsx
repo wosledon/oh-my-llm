@@ -74,7 +74,7 @@ export default function UsagePage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       <Card variant="outlined" sx={{ borderRadius: 2 }}>
         <CardContent>
-          <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>{t.usage.title}</Typography>
+          <Typography variant="h4" sx={{ fontWeight: 700, mb: 3, pb: 2, borderBottom: '1px solid', borderColor: 'divider', letterSpacing: -0.5 }}>{t.usage.title}</Typography>
 
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap', mb: 3 }}>
             <CalendarTodayIcon sx={{ color: 'text.secondary' }} />

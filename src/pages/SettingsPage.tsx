@@ -27,18 +27,18 @@ export default function SettingsPage() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ fontWeight: 600, mb: 3 }}>
+      <Typography variant="h4" sx={{ fontWeight: 700, mb: 3, pb: 2, borderBottom: '1px solid', borderColor: 'divider', letterSpacing: -0.5 }}>
         {t.settings.title}
       </Typography>
 
       {loading && <CircularProgress sx={{ display: 'block', mx: 'auto', my: 4 }} />}
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>{t.common.error}: {error}</Alert>
+        <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{t.common.error}: {error}</Alert>
       )}
 
       <Box sx={{ mb: 3 }}>
-        <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>{t.settings.title}</Typography>
-        <Card variant="outlined" sx={{ maxWidth: 560, borderRadius: 2 }}>
+        <Typography variant="h6" sx={{ fontWeight: 600, mb: 2, color: 'text.primary' }}>{t.settings.title}</Typography>
+        <Card sx={{ maxWidth: 560, borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
           <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
               label={t.settings.port}
@@ -126,7 +126,7 @@ export default function SettingsPage() {
 
       <Box>
         <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>{t.settings.language}</Typography>
-        <Card variant="outlined" sx={{ maxWidth: 560, borderRadius: 2 }}>
+        <Card sx={{ maxWidth: 560, borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
           <CardContent>
             <FormControl fullWidth>
               <InputLabel>{t.settings.language}</InputLabel>
