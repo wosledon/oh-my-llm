@@ -293,9 +293,46 @@ export default function Dashboard() {
             />
 
             {!!config?.shadow_mapping_id && (
-              <FormControl fullWidth size="small">
-                <InputLabel>{t.dashboard.shadowModelSelectLabel}</InputLabel>
-                <Select
+              <>
+                {/* 选中的模型信息 */}
+                {(() => {
+                  const selectedModel = models.find((m) => m.id === config.shadow_mapping_id);
+                  const provider = selectedModel ? providers.find((p) => p.id === selectedModel.provider_id) : undefined;
+                  if (!selectedModel || !provider) return null;
+                  return (
+                    <Box sx={{ bgcolor: 'action.hover', borderRadius: 1.5, px: 2, py: 1.25, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          {t.models.provider}
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {provider.name}
+                        </Typography>
+                      </Box>
+                      <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', sm: 'block' } }} />
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          {t.logs.protocol}
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 600, textTransform: 'uppercase' }}>
+                          {provider.prov_type}
+                        </Typography>
+                      </Box>
+                      <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', sm: 'block' } }} />
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          {t.models.upstreamName}
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>
+                          {selectedModel.upstream_name}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  );
+                })()}
+                <FormControl fullWidth size="small">
+                  <InputLabel>{t.dashboard.shadowModelSelectLabel}</InputLabel>
+                  <Select
                   value={config.shadow_mapping_id}
                   label={t.dashboard.shadowModelSelectLabel}
                   onChange={(e) => {
@@ -338,6 +375,7 @@ export default function Dashboard() {
                     })}
                 </Select>
               </FormControl>
+              </>
             )}
           </CardContent>
         </Card>

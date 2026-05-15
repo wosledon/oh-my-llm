@@ -1,7 +1,7 @@
-use crate::protocol::anthropic_types::{AnthropicMessage, AnthropicRequest, AnthropicResponse};
-use crate::protocol::openai_types::{
-    ChatCompletionRequest, ChatCompletionResponse, Choice, Usage,
+use crate::protocol::anthropic_types::{
+    AnthropicMessage, AnthropicMessageContent, AnthropicRequest, AnthropicResponse, AnthropicSystem,
 };
+use crate::protocol::openai_types::{ChatCompletionRequest, ChatCompletionResponse, Choice, Usage};
 
 /// Convert OpenAI chat completion request to Anthropic messages request
 pub fn openai_to_anthropic(req: ChatCompletionRequest) -> AnthropicRequest {
@@ -18,10 +18,28 @@ pub fn openai_to_anthropic(req: ChatCompletionRequest) -> AnthropicRequest {
                 "assistant" => "assistant",
                 _ => "user",
             };
+            let mut blocks: Vec<crate::protocol::anthropic_types::AnthropicContentBlock> =
+                Vec::new();
+            // thinking / reasoning_content → thinking block (must come first)
+            if let Some(reasoning) = &msg.reasoning_content {
+                if !reasoning.is_empty() {
+                    blocks.push(
+                        crate::protocol::anthropic_types::AnthropicContentBlock::Thinking {
+                            thinking: reasoning.clone(),
+                            signature: String::new(),
+                        },
+                    );
+                }
+            }
             if let Some(content) = extract_text(&msg.content) {
+                blocks.push(
+                    crate::protocol::anthropic_types::AnthropicContentBlock::Text { text: content },
+                );
+            }
+            if !blocks.is_empty() {
                 anthropic_messages.push(AnthropicMessage {
                     role: role.to_string(),
-                    content,
+                    content: AnthropicMessageContent::Blocks(blocks),
                 });
             }
         }
@@ -33,7 +51,7 @@ pub fn openai_to_anthropic(req: ChatCompletionRequest) -> AnthropicRequest {
         model: req.model,
         max_tokens,
         messages: anthropic_messages,
-        system: system_msg,
+        system: system_msg.map(AnthropicSystem::Text),
         temperature: req.temperature,
         top_p: req.top_p,
         top_k: None,
@@ -87,7 +105,9 @@ pub fn anthropic_to_openai_request(req: AnthropicRequest) -> ChatCompletionReque
         messages.push(crate::protocol::openai_types::ChatMessage {
             role: "system".to_string(),
             name: None,
-            content: Some(crate::protocol::openai_types::ChatContent::Text(system)),
+            content: Some(crate::protocol::openai_types::ChatContent::Text(
+                system.text(),
+            )),
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -95,14 +115,26 @@ pub fn anthropic_to_openai_request(req: AnthropicRequest) -> ChatCompletionReque
     }
 
     for msg in req.messages {
-        messages.push(crate::protocol::openai_types::ChatMessage {
-            role: msg.role,
-            name: None,
-            content: Some(crate::protocol::openai_types::ChatContent::Text(msg.content)),
-            reasoning_content: None,
-            tool_calls: None,
-            tool_call_id: None,
-        });
+        let text = msg.content.text();
+        let thinking = msg.content.thinking();
+        if !text.is_empty() || !thinking.is_empty() {
+            messages.push(crate::protocol::openai_types::ChatMessage {
+                role: msg.role,
+                name: None,
+                content: if text.is_empty() {
+                    None
+                } else {
+                    Some(crate::protocol::openai_types::ChatContent::Text(text))
+                },
+                reasoning_content: if thinking.is_empty() {
+                    None
+                } else {
+                    Some(thinking)
+                },
+                tool_calls: None,
+                tool_call_id: None,
+            });
+        }
     }
 
     ChatCompletionRequest {
@@ -132,7 +164,9 @@ pub fn openai_to_anthropic_response(resp: ChatCompletionResponse) -> AnthropicRe
         message: crate::protocol::openai_types::ChatMessage {
             role: "assistant".to_string(),
             name: None,
-            content: Some(crate::protocol::openai_types::ChatContent::Text("".to_string())),
+            content: Some(crate::protocol::openai_types::ChatContent::Text(
+                "".to_string(),
+            )),
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
@@ -146,9 +180,7 @@ pub fn openai_to_anthropic_response(resp: ChatCompletionResponse) -> AnthropicRe
     let content = if text_content.is_empty() {
         vec![]
     } else {
-        vec![crate::protocol::anthropic_types::AnthropicContent::Text {
-            text: text_content,
-        }]
+        vec![crate::protocol::anthropic_types::AnthropicContent::Text { text: text_content }]
     };
 
     let usage = resp.usage.unwrap_or(Usage {

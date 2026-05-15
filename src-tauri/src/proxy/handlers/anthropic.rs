@@ -6,7 +6,7 @@ use axum::extract::State;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, HeaderValue, HeaderName, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use std::time::Instant;
 
 pub async fn handle_anthropic_messages(
@@ -15,7 +15,7 @@ pub async fn handle_anthropic_messages(
 ) -> Response {
     let start = Instant::now();
 
-    let bytes = match to_bytes(req.into_body(), 1024 * 1024).await {
+    let bytes = match to_bytes(req.into_body(), 50 * 1024 * 1024).await {
         Ok(b) => b,
         Err(e) => {
             return build_error_response(
@@ -28,10 +28,7 @@ pub async fn handle_anthropic_messages(
     let mut request: AnthropicRequest = match serde_json::from_slice(&bytes) {
         Ok(r) => r,
         Err(e) => {
-            return build_error_response(
-                StatusCode::BAD_REQUEST,
-                &format!("Invalid JSON: {}", e),
-            );
+            return build_error_response(StatusCode::BAD_REQUEST, &format!("Invalid JSON: {}", e));
         }
     };
 
@@ -43,7 +40,10 @@ pub async fn handle_anthropic_messages(
         Ok(c) => c,
         Err(_) => {
             drop(db_guard);
-            return build_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to read proxy config");
+            return build_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to read proxy config",
+            );
         }
     };
 
@@ -79,8 +79,7 @@ pub async fn handle_anthropic_messages(
         let mut headers = HeaderMap::new();
         headers.insert(
             HeaderName::from_static("x-api-key"),
-            HeaderValue::from_str(&api_key)
-                .unwrap_or_else(|_| HeaderValue::from_static("")),
+            HeaderValue::from_str(&api_key).unwrap_or_else(|_| HeaderValue::from_static("")),
         );
         headers.insert(
             HeaderName::from_static("anthropic-version"),
@@ -89,7 +88,9 @@ pub async fn handle_anthropic_messages(
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         if let Some(extra) = extra_headers {
-            if let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&extra) {
+            if let Ok(map) =
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&extra)
+            {
                 for (k, v) in map {
                     if let Some(val) = v.as_str() {
                         if let Ok(hv) = HeaderValue::from_str(val) {
@@ -107,12 +108,26 @@ pub async fn handle_anthropic_messages(
             .build()
             .expect("Failed to build HTTP client");
 
-        let url = format!("{}/messages", base_url.trim_end_matches('/'));
+        let base = base_url.trim_end_matches('/');
+        let url = if base.ends_with("/v1") {
+            format!("{}/messages", base)
+        } else {
+            format!("{}/v1/messages", base)
+        };
 
-        let resp = match client.post(&url).headers(headers).json(&request).send().await {
+        let resp = match client
+            .post(&url)
+            .headers(headers)
+            .json(&request)
+            .send()
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
-                return build_error_response(StatusCode::BAD_GATEWAY, &format!("Upstream error: {}", e));
+                return build_error_response(
+                    StatusCode::BAD_GATEWAY,
+                    &format!("Upstream error: {}", e),
+                );
             }
         };
 
@@ -120,16 +135,22 @@ pub async fn handle_anthropic_messages(
 
         if is_stream {
             let stream = resp.bytes_stream();
-            let body_stream = Body::from_stream(stream.map(|result| result.map_err(|e| axum::Error::new(e))));
+            let body_stream =
+                Body::from_stream(stream.map(|result| result.map_err(|e| axum::Error::new(e))));
             let mut response = Response::new(body_stream);
             *response.status_mut() = status;
-            response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+            response
+                .headers_mut()
+                .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
             return response;
         } else {
             let bytes = match resp.bytes().await {
                 Ok(b) => b,
                 Err(e) => {
-                    return build_error_response(StatusCode::BAD_GATEWAY, &format!("Failed to read upstream response: {}", e));
+                    return build_error_response(
+                        StatusCode::BAD_GATEWAY,
+                        &format!("Failed to read upstream response: {}", e),
+                    );
                 }
             };
             let mut response = Response::new(Body::from(bytes));
@@ -179,16 +200,26 @@ pub async fn handle_anthropic_messages(
                                                 return;
                                             }
 
-                                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                                                let chunk_id = json.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            if let Ok(json) =
+                                                serde_json::from_str::<serde_json::Value>(data)
+                                            {
+                                                let chunk_id = json
+                                                    .get("id")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("")
+                                                    .to_string();
                                                 if !chunk_id.is_empty() {
                                                     id = chunk_id;
                                                 }
 
-                                                if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
+                                                if let Some(choices) =
+                                                    json.get("choices").and_then(|c| c.as_array())
+                                                {
                                                     if let Some(choice) = choices.first() {
                                                         let delta = choice.get("delta");
-                                                        let finish_reason = choice.get("finish_reason").and_then(|f| f.as_str());
+                                                        let finish_reason = choice
+                                                            .get("finish_reason")
+                                                            .and_then(|f| f.as_str());
 
                                                         if !sent_start {
                                                             let start = serde_json::json!({
@@ -213,14 +244,25 @@ pub async fn handle_anthropic_messages(
                                                             });
                                                             let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_start\ndata: {}\n\n", block_start)))).await;
 
-                                                            let ping = serde_json::json!({"type": "ping"});
-                                                            let _ = tx.send(Ok(bytes::Bytes::from(format!("event: ping\ndata: {}\n\n", ping)))).await;
+                                                            let ping =
+                                                                serde_json::json!({"type": "ping"});
+                                                            let _ = tx
+                                                                .send(Ok(bytes::Bytes::from(
+                                                                    format!(
+                                                                        "event: ping\ndata: {}\n\n",
+                                                                        ping
+                                                                    ),
+                                                                )))
+                                                                .await;
 
                                                             sent_start = true;
                                                         }
 
                                                         if let Some(delta_obj) = delta {
-                                                            if let Some(content) = delta_obj.get("content").and_then(|c| c.as_str()) {
+                                                            if let Some(content) = delta_obj
+                                                                .get("content")
+                                                                .and_then(|c| c.as_str())
+                                                            {
                                                                 if !content.is_empty() {
                                                                     let delta = serde_json::json!({
                                                                         "type": "content_block_delta",
@@ -239,7 +281,11 @@ pub async fn handle_anthropic_messages(
                                                             });
                                                             let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", block_stop)))).await;
 
-                                                            let stop_reason = if fr == "stop" { "end_turn" } else { fr };
+                                                            let stop_reason = if fr == "stop" {
+                                                                "end_turn"
+                                                            } else {
+                                                                fr
+                                                            };
                                                             let msg_delta = serde_json::json!({
                                                                 "type": "message_delta",
                                                                 "delta": {
@@ -270,46 +316,58 @@ pub async fn handle_anthropic_messages(
                     }
                 });
 
-                let body_stream = Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(rx));
+                let body_stream =
+                    Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(rx));
                 let mut response = Response::new(body_stream);
-                *response.status_mut() = StatusCode::from_u16(status_code as u16).unwrap_or(StatusCode::OK);
-                response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+                *response.status_mut() =
+                    StatusCode::from_u16(status_code as u16).unwrap_or(StatusCode::OK);
+                response
+                    .headers_mut()
+                    .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
                 return response;
             }
 
             let body_bytes = match axum::body::to_bytes(resp.into_body(), 10 * 1024 * 1024).await {
                 Ok(b) => b,
                 Err(_) => {
-                    return build_error_response(StatusCode::BAD_GATEWAY, "Failed to read upstream response");
+                    return build_error_response(
+                        StatusCode::BAD_GATEWAY,
+                        "Failed to read upstream response",
+                    );
                 }
             };
 
-            let openai_resp: crate::protocol::openai_types::ChatCompletionResponse = match serde_json::from_slice(&body_bytes) {
-                Ok(r) => r,
-                Err(_) => {
-                    return build_error_response(StatusCode::BAD_GATEWAY, "Invalid upstream response format");
-                }
-            };
+            let openai_resp: crate::protocol::openai_types::ChatCompletionResponse =
+                match serde_json::from_slice(&body_bytes) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        return build_error_response(
+                            StatusCode::BAD_GATEWAY,
+                            "Invalid upstream response format",
+                        );
+                    }
+                };
 
             let anthropic_resp = openai_to_anthropic_response(openai_resp);
             let body = match serde_json::to_vec(&anthropic_resp) {
                 Ok(b) => b,
                 Err(_) => {
-                    return build_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize response");
+                    return build_error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to serialize response",
+                    );
                 }
             };
 
             let mut response = Response::new(Body::from(body));
-            *response.status_mut() = StatusCode::from_u16(status_code as u16).unwrap_or(StatusCode::OK);
-            response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+            *response.status_mut() =
+                StatusCode::from_u16(status_code as u16).unwrap_or(StatusCode::OK);
+            response
+                .headers_mut()
+                .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
             response
         }
-        Err(e) => {
-            build_error_response(
-                StatusCode::BAD_GATEWAY,
-                &format!("Upstream error: {}", e),
-            )
-        }
+        Err(e) => build_error_response(StatusCode::BAD_GATEWAY, &format!("Upstream error: {}", e)),
     }
 }
 

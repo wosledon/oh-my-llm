@@ -167,7 +167,30 @@ impl ThinkFilter {
     /// and return the transformed bytes. Incomplete events are kept in `sse_buffer`.
     fn process_sse_chunk(&mut self, chunk: &bytes::Bytes) -> bytes::Bytes {
         // Once filtering is finished, avoid all SSE parsing and forward raw.
+        // Still count characters for token estimation.
         if self.done && self.sse_buffer.is_empty() {
+            let text = String::from_utf8_lossy(chunk);
+            for line in text.lines() {
+                if line.starts_with("data: ") {
+                    let data = &line[6..];
+                    if data != "[DONE]" {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            if let Some(content) = json
+                                .pointer("/choices/0/delta/content")
+                                .and_then(|c| c.as_str())
+                            {
+                                self.output_chars += content.chars().count();
+                            }
+                            if let Some(reasoning) = json
+                                .pointer("/choices/0/delta/reasoning_content")
+                                .and_then(|c| c.as_str())
+                            {
+                                self.output_chars += reasoning.chars().count();
+                            }
+                        }
+                    }
+                }
+            }
             return chunk.clone();
         }
 
@@ -192,11 +215,12 @@ impl ThinkFilter {
             if let Some(data) = data_line {
                 if data == "[DONE]" {
                     // flush any remaining reasoning before DONE
+                    let prev_output_chars = self.output_chars;
                     let (final_reasoning, final_content, remaining_chars) = {
                         let f = std::mem::replace(self, ThinkFilter::new());
                         f.flush()
                     };
-                    self.output_chars += remaining_chars;
+                    self.output_chars = prev_output_chars + remaining_chars;
                     if !final_reasoning.is_empty() || !final_content.is_empty() {
                         let mut flush_json = serde_json::json!({
                             "choices": [{"index":0,"delta":{},"finish_reason":null}]
@@ -304,6 +328,17 @@ impl ThinkFilter {
 
         bytes::Bytes::from(output)
     }
+
+    /// Flush any remaining SSE data in `sse_buffer` by appending `\n\n` and
+    /// re-processing.  Should be called once when the upstream stream ends.
+    fn flush_sse_buffer(&mut self) -> bytes::Bytes {
+        if self.sse_buffer.is_empty() {
+            return bytes::Bytes::new();
+        }
+        let mut buf = std::mem::take(&mut self.sse_buffer);
+        buf.push_str("\n\n");
+        self.process_sse_chunk(&bytes::Bytes::from(buf))
+    }
 }
 
 /// Largest index ≤ `byte_idx` that is a char boundary.
@@ -365,7 +400,7 @@ pub async fn handle_chat_completions(
 ) -> Response {
     let start = Instant::now();
 
-    let bytes = match to_bytes(req.into_body(), 1024 * 1024).await {
+    let bytes = match to_bytes(req.into_body(), 50 * 1024 * 1024).await {
         Ok(b) => b,
         Err(e) => {
             return build_error_response(
@@ -459,15 +494,28 @@ pub async fn handle_chat_completions(
                 let stream = body.into_data_stream();
                 let completion_estimate = Arc::new(AtomicI64::new(0));
                 let completion_clone = completion_estimate.clone();
-                let mut filter = ThinkFilter::with_completion_counter(completion_clone);
+                let filter = ThinkFilter::with_completion_counter(completion_clone);
 
-                let transformed = stream.map(move |result| match result {
-                    Ok(chunk) => {
-                        let out = filter.process_sse_chunk(&chunk);
-                        Ok(out)
-                    }
-                    Err(e) => Err(e),
-                });
+                let transformed = futures_util::stream::unfold(
+                    (stream, filter),
+                    |(mut stream, mut filter)| async move {
+                        match stream.next().await {
+                            Some(Ok(chunk)) => {
+                                let out = filter.process_sse_chunk(&chunk);
+                                Some((Ok(out), (stream, filter)))
+                            }
+                            Some(Err(e)) => Some((Err(e), (stream, filter))),
+                            None => {
+                                let out = filter.flush_sse_buffer();
+                                if out.is_empty() {
+                                    None
+                                } else {
+                                    Some((Ok(out), (stream, filter)))
+                                }
+                            }
+                        }
+                    },
+                );
 
                 let new_body = Body::from_stream(transformed);
                 let mut response = Response::new(new_body);
