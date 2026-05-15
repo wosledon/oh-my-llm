@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Button from '@mui/material/Button';
-import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
 import Switch from '@mui/material/Switch';
@@ -33,8 +32,6 @@ export default function Dashboard() {
   const { config, running, getStatus, startProxy, stopProxy, updateConfig, fetchConfig } = useProxyStore();
   const { providers, fetchProviders } = useProviderStore();
   const { models, fetchModels } = useModelStore();
-  const [copied, setCopied] = useState(false);
-
   // 本地输入状态，避免直接绑定 store 导致输入被覆盖
   const [portInput, setPortInput] = useState(String(config?.port ?? 11888));
   const [shadowNameInput, setShadowNameInput] = useState(config?.shadow_model_name ?? 'oh-my-llm');
@@ -53,19 +50,6 @@ export default function Dashboard() {
       setShadowNameInput(config.shadow_model_name);
     }
   }, [config?.port, config?.shadow_model_name]);
-
-  const proxyAddress = config ? `http://127.0.0.1:${config.port}/v1` : '';
-
-  const handleCopy = async () => {
-    if (!proxyAddress) return;
-    try {
-      await navigator.clipboard.writeText(proxyAddress);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // ignore
-    }
-  };
 
   const enabledModels = models.filter((m) => m.enabled).length;
 
@@ -121,161 +105,259 @@ export default function Dashboard() {
     </Box>
   );
 
+  const [copiedOpenAI, setCopiedOpenAI] = useState(false);
+  const [copiedAnthropic, setCopiedAnthropic] = useState(false);
+
+  const openaiAddress = config ? `http://127.0.0.1:${config.port}/v1` : '';
+  const anthropicAddress = config ? `http://127.0.0.1:${config.port}/v1/messages` : '';
+
+  const handleCopyOpenAI = async () => {
+    if (!openaiAddress) return;
+    try { await navigator.clipboard.writeText(openaiAddress); setCopiedOpenAI(true); setTimeout(() => setCopiedOpenAI(false), 2000); } catch {}
+  };
+  const handleCopyAnthropic = async () => {
+    if (!anthropicAddress) return;
+    try { await navigator.clipboard.writeText(anthropicAddress); setCopiedAnthropic(true); setTimeout(() => setCopiedAnthropic(false), 2000); } catch {}
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      {/* 第一行：代理状态 + 代理配置（地址+端口+协议+统计） */}
+      {/* 第一行：代理状态 | 影子模型 | 代理地址 */}
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', md: '1fr 1.2fr' },
+          gridTemplateColumns: { xs: '1fr', md: '220px 1fr 1fr' },
           gap: 2.5,
         }}
       >
-        {/* 代理状态卡片 */}
+        {/* 左列：代理状态（紧凑） */}
         <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
-          <CardContent sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+          <CardContent sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box sx={iconBg(running ? 'success' : 'error')}>
                 {running ? <StopIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />}
               </Box>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.3 }}>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.3 }}>
                   {t.dashboard.proxyStatus}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="caption" color="text.secondary" noWrap>
                   {running ? t.dashboard.running : t.dashboard.stopped}
                 </Typography>
               </Box>
-              <Chip
-                size="small"
-                color={running ? 'success' : 'error'}
-                label={running ? t.dashboard.running : t.dashboard.stopped}
-                sx={{ fontWeight: 600 }}
-              />
             </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-              <Typography variant="h3" sx={{ fontWeight: 800, lineHeight: 1 }}>
+
+            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75 }}>
+              <Typography variant="h4" sx={{ fontWeight: 800, lineHeight: 1 }}>
                 {config ? config.port : '--'}
               </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ pt: 0.5 }}>
+              <Typography variant="caption" color="text.secondary">
                 {t.dashboard.port}
               </Typography>
             </Box>
+
             <Button
               variant={running ? 'outlined' : 'contained'}
               size="small"
               startIcon={running ? <StopIcon /> : <PlayArrowIcon />}
               color={running ? 'error' : 'primary'}
               onClick={async () => {
-                if (running) {
-                  await stopProxy();
-                } else {
-                  await startProxy();
-                }
+                if (running) { await stopProxy(); } else { await startProxy(); }
                 await fetchConfig();
                 await getStatus();
               }}
               fullWidth
+              sx={{ mt: 'auto' }}
             >
               {running ? t.dashboard.stop : t.dashboard.start}
             </Button>
           </CardContent>
         </Card>
 
-        {/* 代理配置卡片：地址 + 端口 + 协议 + 统计 */}
+        {/* 中列：影子模型 */}
         <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
-          <CardContent sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+          <CardContent sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box sx={iconBg('info')}>
+                <ViewInArIcon fontSize="small" />
+              </Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                {t.dashboard.shadowModel}
+              </Typography>
+            </Box>
+
+            <TextField
+              size="small"
+              label={t.settings.shadowModelName}
+              value={shadowNameInput}
+              onChange={(e) => setShadowNameInput(e.target.value)}
+              onBlur={() => {
+                if (!config) return;
+                if (shadowNameInput !== config.shadow_model_name) {
+                  updateConfig({ ...config, shadow_model_name: shadowNameInput });
+                }
+              }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }}
+              placeholder="oh-my-llm"
+              fullWidth
+            />
+
+            <ProtocolSwitch
+              checked={!!config?.shadow_mapping_id}
+              onChange={(v) => {
+                if (!config) return;
+                const shadow_mapping_id = v
+                  ? (config.shadow_mapping_id || models[0]?.id || '')
+                  : null;
+                updateConfig({ ...config, shadow_mapping_id });
+              }}
+              label={t.dashboard.shadowModelSwitch}
+              color="primary"
+            />
+
+            {!!config?.shadow_mapping_id && (
+              <FormControl fullWidth size="small">
+                <InputLabel>{t.dashboard.shadowModelSelectLabel}</InputLabel>
+                <Select
+                  value={config.shadow_mapping_id}
+                  label={t.dashboard.shadowModelSelectLabel}
+                  onChange={(e) => {
+                    if (!config) return;
+                    updateConfig({ ...config, shadow_mapping_id: e.target.value });
+                  }}
+                  MenuProps={{
+                    slotProps: {
+                      paper: {
+                        sx: {
+                          mt: 1,
+                          borderRadius: 2,
+                          boxShadow: (theme: any) => theme.shadows[8],
+                          minWidth: 260,
+                        },
+                      },
+                    },
+                  }}
+                >
+                  {providers
+                    .filter((p) => models.some((m) => m.provider_id === p.id))
+                    .map((provider, pIdx, filteredProviders) => {
+                      const providerModels = models.filter((m) => m.provider_id === provider.id);
+                      return [
+                        <ListSubheader
+                          key={`sub-${provider.id}`}
+                          sx={{ fontWeight: 700, bgcolor: 'background.paper' }}
+                        >
+                          {provider.name}
+                        </ListSubheader>,
+                        ...providerModels.map((m) => (
+                          <MenuItem key={m.id} value={m.id} sx={{ pl: 3 }}>
+                            {m.upstream_name}
+                          </MenuItem>
+                        )),
+                        pIdx < filteredProviders.length - 1 && (
+                          <Divider key={`div-${provider.id}`} component="li" />
+                        ),
+                      ];
+                    })}
+                </Select>
+              </FormControl>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 右列：代理地址（OpenAI + Anthropic） */}
+        <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+          <CardContent sx={{ p: 2.5, display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box sx={iconBg('primary')}>
                 <OpenInNewIcon fontSize="small" />
               </Box>
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                 {t.dashboard.proxyAddress}
               </Typography>
             </Box>
 
-            <Box
-              sx={{
-                bgcolor: 'action.hover',
-                borderRadius: 2,
-                p: 1.5,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1.5,
-                mb: 2,
-              }}
-            >
-              <Typography
-                variant="body2"
-                sx={{ fontFamily: 'monospace', fontWeight: 600, flex: 1, wordBreak: 'break-all' }}
-              >
-                {proxyAddress || '--'}
+            {/* OpenAI 地址 */}
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                OpenAI / Compatible
               </Typography>
-              <Button
-                variant="text"
-                size="small"
-                startIcon={copied ? <CheckIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
-                onClick={handleCopy}
-                disabled={!proxyAddress}
-                sx={{ minWidth: 0, px: 1 }}
+              <Box
+                sx={{
+                  bgcolor: 'action.hover',
+                  borderRadius: 1.5,
+                  px: 1.5,
+                  py: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                }}
               >
-                {copied ? t.dashboard.copied : t.dashboard.copyAddress}
-              </Button>
+                <Typography
+                  variant="body2"
+                  sx={{ fontFamily: 'monospace', fontWeight: 600, flex: 1, wordBreak: 'break-all' }}
+                >
+                  {openaiAddress || '--'}
+                </Typography>
+                <Button
+                  variant="text"
+                  size="small"
+                  startIcon={copiedOpenAI ? <CheckIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
+                  onClick={handleCopyOpenAI}
+                  disabled={!openaiAddress}
+                  sx={{ minWidth: 0, px: 0.5, fontSize: 12 }}
+                >
+                  {copiedOpenAI ? t.dashboard.copied : t.dashboard.copyAddress}
+                </Button>
+              </Box>
             </Box>
 
-            {/* 端口 + 协议 */}
-            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2 }}>
-              <TextField
-                size="small"
-                type="number"
-                label={t.settings.port}
-                value={portInput}
-                onChange={(e) => setPortInput(e.target.value)}
-                onBlur={() => {
-                  if (!config) return;
-                  const port = parseInt(portInput) || 11888;
-                  if (port !== config.port) {
-                    updateConfig({ ...config, port });
-                  }
+            {/* Anthropic 地址 */}
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                Anthropic
+              </Typography>
+              <Box
+                sx={{
+                  bgcolor: 'action.hover',
+                  borderRadius: 1.5,
+                  px: 1.5,
+                  py: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
                 }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    (e.target as HTMLInputElement).blur();
-                  }
-                }}
-                sx={{ width: 120 }}
-              />
-              <ProtocolSwitch
-                checked={config?.openai_enabled ?? true}
-                onChange={(v) => {
-                  if (!config) return;
-                  updateConfig({ ...config, openai_enabled: v });
-                }}
-                label={t.settings.openaiEnabled}
-                color="primary"
-              />
-              <ProtocolSwitch
-                checked={config?.anthropic_enabled ?? true}
-                onChange={(v) => {
-                  if (!config) return;
-                  updateConfig({ ...config, anthropic_enabled: v });
-                }}
-                label={t.settings.anthropicEnabled}
-                color="secondary"
-              />
+              >
+                <Typography
+                  variant="body2"
+                  sx={{ fontFamily: 'monospace', fontWeight: 600, flex: 1, wordBreak: 'break-all' }}
+                >
+                  {anthropicAddress || '--'}
+                </Typography>
+                <Button
+                  variant="text"
+                  size="small"
+                  startIcon={copiedAnthropic ? <CheckIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
+                  onClick={handleCopyAnthropic}
+                  disabled={!anthropicAddress}
+                  sx={{ minWidth: 0, px: 0.5, fontSize: 12 }}
+                >
+                  {copiedAnthropic ? t.dashboard.copied : t.dashboard.copyAddress}
+                </Button>
+              </Box>
             </Box>
 
-            {/* 统计条 */}
-            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <DnsIcon fontSize="small" color="action" />
-                <Typography variant="body2" color="text.secondary">
+            {/* 统计 */}
+            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mt: 'auto', pt: 0.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                <DnsIcon fontSize="small" sx={{ color: 'text.disabled', fontSize: 16 }} />
+                <Typography variant="caption" color="text.secondary">
                   <strong>{providers.length}</strong> {t.dashboard.providerCount}
                 </Typography>
               </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <ViewInArIcon fontSize="small" color="action" />
-                <Typography variant="body2" color="text.secondary">
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                <ViewInArIcon fontSize="small" sx={{ color: 'text.disabled', fontSize: 16 }} />
+                <Typography variant="caption" color="text.secondary">
                   <strong>{models.length}</strong> {t.dashboard.modelCount} / <strong>{enabledModels}</strong>{t.dashboard.enabledCount}
                 </Typography>
               </Box>
@@ -284,103 +366,44 @@ export default function Dashboard() {
         </Card>
       </Box>
 
-      {/* 第二行：影子模型单独卡片 */}
+      {/* 第二行：协议开关 + 端口 */}
       <Card sx={{ borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
-        <CardContent sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-            <Box sx={iconBg('warning')}>
-              <ViewInArIcon fontSize="small" />
-            </Box>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              {t.dashboard.shadowModel}
-            </Typography>
-          </Box>
-
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-              <TextField
-                size="small"
-                label={t.settings.shadowModelName}
-                value={shadowNameInput}
-                onChange={(e) => setShadowNameInput(e.target.value)}
-                onBlur={() => {
-                  if (!config) return;
-                  if (shadowNameInput !== config.shadow_model_name) {
-                    updateConfig({ ...config, shadow_model_name: shadowNameInput });
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    (e.target as HTMLInputElement).blur();
-                  }
-                }}
-                placeholder="oh-my-llm"
-                helperText={t.settings.shadowModelDesc}
-                fullWidth
-              />
-            </Box>
-
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-              <ProtocolSwitch
-                checked={!!config?.shadow_mapping_id}
-                onChange={(v) => {
-                  if (!config) return;
-                  const shadow_mapping_id = v
-                    ? (config.shadow_mapping_id || models[0]?.id || '')
-                    : null;
-                  updateConfig({ ...config, shadow_mapping_id });
-                }}
-                label={t.dashboard.shadowModelSwitch}
-                color="warning"
-              />
-              {!!config?.shadow_mapping_id && (
-                <FormControl fullWidth size="small">
-                  <InputLabel>{t.dashboard.shadowModelSelectLabel}</InputLabel>
-                  <Select
-                    value={config.shadow_mapping_id}
-                    label={t.dashboard.shadowModelSelectLabel}
-                    onChange={(e) => {
-                      if (!config) return;
-                      updateConfig({ ...config, shadow_mapping_id: e.target.value });
-                    }}
-                    MenuProps={{
-                      slotProps: {
-                        paper: {
-                          sx: {
-                            mt: 1,
-                            borderRadius: 2,
-                            boxShadow: (theme: any) => theme.shadows[8],
-                            minWidth: 260,
-                          },
-                        },
-                      },
-                    }}
-                  >
-                    {providers
-                      .filter((p) => models.some((m) => m.provider_id === p.id))
-                      .map((provider, pIdx, filteredProviders) => {
-                        const providerModels = models.filter((m) => m.provider_id === provider.id);
-                        return [
-                          <ListSubheader
-                            key={`sub-${provider.id}`}
-                            sx={{ fontWeight: 700, bgcolor: 'background.paper' }}
-                          >
-                            {provider.name}
-                          </ListSubheader>,
-                          ...providerModels.map((m) => (
-                            <MenuItem key={m.id} value={m.id} sx={{ pl: 3 }}>
-                              {m.upstream_name}
-                            </MenuItem>
-                          )),
-                          pIdx < filteredProviders.length - 1 && (
-                            <Divider key={`div-${provider.id}`} component="li" />
-                          ),
-                        ];
-                      })}
-                  </Select>
-                </FormControl>
-              )}
-            </Box>
+        <CardContent sx={{ p: 2.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+            <TextField
+              size="small"
+              type="number"
+              label={t.settings.port}
+              value={portInput}
+              onChange={(e) => setPortInput(e.target.value)}
+              onBlur={() => {
+                if (!config) return;
+                const port = parseInt(portInput) || 11888;
+                if (port !== config.port) {
+                  updateConfig({ ...config, port });
+                }
+              }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }}
+              sx={{ width: 120 }}
+            />
+            <ProtocolSwitch
+              checked={config?.openai_enabled ?? true}
+              onChange={(v) => {
+                if (!config) return;
+                updateConfig({ ...config, openai_enabled: v });
+              }}
+              label={t.settings.openaiEnabled}
+              color="primary"
+            />
+            <ProtocolSwitch
+              checked={config?.anthropic_enabled ?? true}
+              onChange={(v) => {
+                if (!config) return;
+                updateConfig({ ...config, anthropic_enabled: v });
+              }}
+              label={t.settings.anthropicEnabled}
+              color="secondary"
+            />
           </Box>
         </CardContent>
       </Card>

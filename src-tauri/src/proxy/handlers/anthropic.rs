@@ -139,10 +139,6 @@ pub async fn handle_anthropic_messages(
     }
 
     // For OpenAI / OpenAI-compatible upstream: translate Anthropic -> OpenAI, send, then translate back
-    if is_stream {
-        return build_error_response(StatusCode::NOT_IMPLEMENTED, "Streaming is not supported for Anthropic-format requests routed to OpenAI-compatible providers");
-    }
-
     let openai_req = anthropic_to_openai_request(request);
     let client = match crate::proxy::router::select_client(&state, &prov_type) {
         Ok(c) => c,
@@ -155,6 +151,132 @@ pub async fn handle_anthropic_messages(
     match result {
         Ok(resp) => {
             let status_code = resp.status().as_u16() as i64;
+
+            if is_stream {
+                // Convert OpenAI SSE stream to Anthropic SSE stream
+                let model = original_model.clone();
+                let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, axum::Error>>(32);
+
+                tokio::spawn(async move {
+                    let mut stream = resp.into_body().into_data_stream();
+                    let mut buffer = String::new();
+                    let mut sent_start = false;
+                    let mut id = String::new();
+
+                    while let Some(chunk) = stream.next().await {
+                        match chunk {
+                            Ok(data_bytes) => {
+                                buffer.push_str(&String::from_utf8_lossy(&data_bytes));
+                                loop {
+                                    if let Some(line_end) = buffer.find('\n') {
+                                        let line = buffer[..line_end].trim().to_string();
+                                        buffer = buffer[line_end + 1..].to_string();
+
+                                        if line.starts_with("data: ") {
+                                            let data = line[6..].trim();
+                                            if data == "[DONE]" {
+                                                let _ = tx.send(Ok(bytes::Bytes::from("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))).await;
+                                                return;
+                                            }
+
+                                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                                                let chunk_id = json.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                if !chunk_id.is_empty() {
+                                                    id = chunk_id;
+                                                }
+
+                                                if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
+                                                    if let Some(choice) = choices.first() {
+                                                        let delta = choice.get("delta");
+                                                        let finish_reason = choice.get("finish_reason").and_then(|f| f.as_str());
+
+                                                        if !sent_start {
+                                                            let start = serde_json::json!({
+                                                                "type": "message_start",
+                                                                "message": {
+                                                                    "id": id.clone(),
+                                                                    "type": "message",
+                                                                    "role": "assistant",
+                                                                    "model": model,
+                                                                    "content": [],
+                                                                    "stop_reason": null,
+                                                                    "stop_sequence": null,
+                                                                    "usage": { "input_tokens": 0, "output_tokens": 0 }
+                                                                }
+                                                            });
+                                                            let _ = tx.send(Ok(bytes::Bytes::from(format!("event: message_start\ndata: {}\n\n", start)))).await;
+
+                                                            let block_start = serde_json::json!({
+                                                                "type": "content_block_start",
+                                                                "index": 0,
+                                                                "content_block": { "type": "text", "text": "" }
+                                                            });
+                                                            let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_start\ndata: {}\n\n", block_start)))).await;
+
+                                                            let ping = serde_json::json!({"type": "ping"});
+                                                            let _ = tx.send(Ok(bytes::Bytes::from(format!("event: ping\ndata: {}\n\n", ping)))).await;
+
+                                                            sent_start = true;
+                                                        }
+
+                                                        if let Some(delta_obj) = delta {
+                                                            if let Some(content) = delta_obj.get("content").and_then(|c| c.as_str()) {
+                                                                if !content.is_empty() {
+                                                                    let delta = serde_json::json!({
+                                                                        "type": "content_block_delta",
+                                                                        "index": 0,
+                                                                        "delta": { "type": "text_delta", "text": content }
+                                                                    });
+                                                                    let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_delta\ndata: {}\n\n", delta)))).await;
+                                                                }
+                                                            }
+                                                        }
+
+                                                        if let Some(fr) = finish_reason {
+                                                            let block_stop = serde_json::json!({
+                                                                "type": "content_block_stop",
+                                                                "index": 0
+                                                            });
+                                                            let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", block_stop)))).await;
+
+                                                            let stop_reason = if fr == "stop" { "end_turn" } else { fr };
+                                                            let msg_delta = serde_json::json!({
+                                                                "type": "message_delta",
+                                                                "delta": {
+                                                                    "stop_reason": stop_reason,
+                                                                    "stop_sequence": null
+                                                                },
+                                                                "usage": { "output_tokens": 0 }
+                                                            });
+                                                            let _ = tx.send(Ok(bytes::Bytes::from(format!("event: message_delta\ndata: {}\n\n", msg_delta)))).await;
+
+                                                            let _ = tx.send(Ok(bytes::Bytes::from("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))).await;
+                                                            return;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(Err(e)).await;
+                                break;
+                            }
+                        }
+                    }
+                });
+
+                let body_stream = Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(rx));
+                let mut response = Response::new(body_stream);
+                *response.status_mut() = StatusCode::from_u16(status_code as u16).unwrap_or(StatusCode::OK);
+                response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+                return response;
+            }
+
             let body_bytes = match axum::body::to_bytes(resp.into_body(), 10 * 1024 * 1024).await {
                 Ok(b) => b,
                 Err(_) => {
