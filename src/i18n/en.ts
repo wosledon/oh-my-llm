@@ -127,6 +127,7 @@ export const en: Translation = {
     totalCompletionTokens: 'Completion Tokens',
     totalCost: 'Total Cost',
     model: 'Model',
+    provider: 'Provider',
     requestCount: 'Requests',
     promptTokens: 'Input Tokens',
     completionTokens: 'Output Tokens',

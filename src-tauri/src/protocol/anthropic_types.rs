@@ -9,6 +9,7 @@ pub struct AnthropicMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnthropicRequest {
     pub model: String,
+    #[serde(default = "default_max_tokens")]
     pub max_tokens: i32,
     pub messages: Vec<AnthropicMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,4 +106,8 @@ pub struct AnthropicErrorDetail {
     #[serde(rename = "type")]
     pub detail_type: String,
     pub message: String,
+}
+
+fn default_max_tokens() -> i32 {
+    4096
 }

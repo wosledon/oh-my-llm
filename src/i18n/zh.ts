@@ -125,6 +125,7 @@ export interface Translation {
     totalCompletionTokens: string;
     totalCost: string;
     model: string;
+    provider: string;
     requestCount: string;
     promptTokens: string;
     completionTokens: string;
@@ -267,6 +268,7 @@ export const zh: Translation = {
     totalCompletionTokens: '输出 Token',
     totalCost: '总费用',
     model: '模型',
+    provider: '供应商',
     requestCount: '请求数',
     promptTokens: '输入 Token',
     completionTokens: '输出 Token',

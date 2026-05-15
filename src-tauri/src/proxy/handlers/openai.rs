@@ -228,7 +228,22 @@ impl ThinkFilter {
                 }
 
                 // Fast path: filter already finished → forward raw data line
-                if self.done {
+                // Still parse JSON briefly to count chars for token estimation.
+                if self.done && data != "[DONE]" {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        if let Some(content) = json
+                            .pointer("/choices/0/delta/content")
+                            .and_then(|c| c.as_str())
+                        {
+                            self.output_chars += content.chars().count();
+                        }
+                        if let Some(reasoning) = json
+                            .pointer("/choices/0/delta/reasoning_content")
+                            .and_then(|c| c.as_str())
+                        {
+                            self.output_chars += reasoning.chars().count();
+                        }
+                    }
                     output.extend_from_slice(b"data: ");
                     output.extend_from_slice(data.as_bytes());
                     for line in &other_lines {

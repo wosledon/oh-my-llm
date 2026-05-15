@@ -9,10 +9,18 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/material/Box';
-import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import TextField from '@mui/material/TextField';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 import { formatCompact, formatCost } from '../utils/formatNumber';
+
+/** 返回本地时区的 YYYY-MM-DD */
+function localDateStr(d = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 interface DailyUsage {
   date: string;
@@ -34,8 +42,8 @@ interface UsageSummary {
 export default function UsagePage() {
   const { t } = useI18n();
 
-  const today = new Date().toISOString().split('T')[0];
-  const fifteenDaysAgo = new Date(Date.now() - 15 * 86400000).toISOString().split('T')[0];
+  const today = localDateStr();
+  const fifteenDaysAgo = localDateStr(new Date(Date.now() - 15 * 86400000));
 
   const [startDate, setStartDate] = useState(fifteenDaysAgo);
   const [endDate, setEndDate] = useState(today);
@@ -77,39 +85,24 @@ export default function UsagePage() {
           <Typography variant="h4" sx={{ fontWeight: 700, mb: 3, pb: 2, borderBottom: '1px solid', borderColor: 'divider', letterSpacing: -0.5 }}>{t.usage.title}</Typography>
 
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap', mb: 3 }}>
-            <CalendarTodayIcon sx={{ color: 'text.secondary' }} />
-            <Box
-              component="input"
+            <TextField
               type="date"
+              label={t.usage.dateRange}
               value={startDate}
-              onChange={(e: any) => setStartDate(e.target.value)}
-              sx={{
-                px: 1.5,
-                py: 1,
-                borderRadius: 1,
-                border: '1px solid',
-                borderColor: 'divider',
-                bgcolor: 'background.paper',
-                color: 'text.primary',
-                fontFamily: 'inherit',
-              }}
+              onChange={(e) => setStartDate(e.target.value)}
+              size="small"
+              sx={{ width: 160 }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
-            <Typography color="text.secondary">-</Typography>
-            <Box
-              component="input"
+            <Typography color="text.secondary">→</Typography>
+            <TextField
               type="date"
+              label={t.usage.dateRange}
               value={endDate}
-              onChange={(e: any) => setEndDate(e.target.value)}
-              sx={{
-                px: 1.5,
-                py: 1,
-                borderRadius: 1,
-                border: '1px solid',
-                borderColor: 'divider',
-                bgcolor: 'background.paper',
-                color: 'text.primary',
-                fontFamily: 'inherit',
-              }}
+              onChange={(e) => setEndDate(e.target.value)}
+              size="small"
+              sx={{ width: 160 }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
           </Box>
 
@@ -157,6 +150,7 @@ export default function UsagePage() {
                 <TableRow>
                   <TableCell>{t.usage.dateRange}</TableCell>
                   <TableCell>{t.usage.model}</TableCell>
+                  <TableCell>{t.usage.provider}</TableCell>
                   <TableCell>{t.usage.requestCount}</TableCell>
                   <TableCell>{t.usage.promptTokens}</TableCell>
                   <TableCell>{t.usage.completionTokens}</TableCell>
@@ -168,6 +162,7 @@ export default function UsagePage() {
                   <TableRow key={idx} hover>
                     <TableCell>{item.date}</TableCell>
                     <TableCell>{item.model}</TableCell>
+                    <TableCell>{item.provider_id || '-'}</TableCell>
                     <TableCell>{item.request_count}</TableCell>
                     <TableCell>{formatCompact(item.prompt_tokens)}</TableCell>
                     <TableCell>{formatCompact(item.completion_tokens)}</TableCell>
