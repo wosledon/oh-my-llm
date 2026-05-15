@@ -1,71 +1,35 @@
 import { useEffect, useState } from 'react';
-import {
-  Title1,
-  Button,
-  Table,
-  TableHeader,
-  TableRow,
-  TableHeaderCell,
-  TableBody,
-  TableCell,
-  Dialog,
-  DialogTrigger,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogActions,
-  DialogContent,
-  Label,
-  Input,
-  Dropdown,
-  Option,
-  makeStyles,
-  Spinner,
-  Card,
-  shorthands,
-  tokens,
-  Badge,
-} from '@fluentui/react-components';
-import { Add24Regular, Delete24Regular } from '@fluentui/react-icons';
+import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import Table from '@mui/material/Table';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+import TableCell from '@mui/material/TableCell';
+import TableBody from '@mui/material/TableBody';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
+import TextField from '@mui/material/TextField';
+import InputLabel from '@mui/material/InputLabel';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
+import FormControl from '@mui/material/FormControl';
+import CircularProgress from '@mui/material/CircularProgress';
+import Card from '@mui/material/Card';
+import Chip from '@mui/material/Chip';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import IconButton from '@mui/material/IconButton';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useProviderStore } from '../stores/providerStore';
 import { useI18n } from '../i18n';
 import type { ProviderInput } from '../types';
 
-const useStyles = makeStyles({
-  toolbar: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '24px',
-  },
-  card: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
-    ...shorthands.borderRadius(tokens.borderRadiusXLarge),
-    overflow: 'hidden',
-  },
-  tableRow: {
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
-  },
-  formField: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-    marginBottom: '16px',
-  },
-  empty: {
-    textAlign: 'center',
-    padding: '48px',
-    color: tokens.colorNeutralForeground3,
-  },
-});
-
 const PROV_TYPES = ['openai', 'anthropic', 'openai_compatible'];
 
 export default function ProvidersPage() {
-  const styles = useStyles();
   const { t } = useI18n();
   const { providers, loading, error, fetchProviders, addProvider, deleteProvider } = useProviderStore();
   const [open, setOpen] = useState(false);
@@ -88,93 +52,106 @@ export default function ProvidersPage() {
   };
 
   return (
-    <div>
-      <div className={styles.toolbar}>
-        <Title1>{t.providers.title}</Title1>
-        <Dialog open={open} onOpenChange={(_, data: { open: boolean }) => setOpen(data.open)}>
-          <DialogTrigger disableButtonEnhancement>
-            <Button icon={<Add24Regular />} appearance="primary">{t.providers.addProvider}</Button>
-          </DialogTrigger>
-          <DialogSurface>
-            <DialogBody>
-              <DialogTitle>{t.providers.addProvider}</DialogTitle>
-              <DialogContent>
-                <div className={styles.formField}>
-                  <Label>{t.providers.name}</Label>
-                  <Input value={form.name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder={t.providers.placeholderName} />
-                </div>
-                <div className={styles.formField}>
-                  <Label>{t.providers.type}</Label>
-                  <Dropdown value={form.prov_type} onOptionSelect={(_: unknown, data: { optionValue?: string }) => setForm({ ...form, prov_type: data.optionValue || 'openai' })}>
-                    {PROV_TYPES.map((t) => (
-                      <Option key={t} value={t}>{t}</Option>
-                    ))}
-                  </Dropdown>
-                </div>
-                <div className={styles.formField}>
-                  <Label>{t.providers.baseUrl}</Label>
-                  <Input value={form.base_url} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, base_url: e.target.value })} placeholder={t.providers.placeholderUrl} />
-                </div>
-                <div className={styles.formField}>
-                  <Label>{t.providers.apiKey}</Label>
-                  <Input type="password" value={form.api_key} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key: e.target.value })} />
-                </div>
-                <div className={styles.formField}>
-                  <Label>{t.providers.extraHeaders}</Label>
-                  <Input value={form.extra_headers || ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, extra_headers: e.target.value })} placeholder={t.providers.placeholderHeaders} />
-                </div>
-              </DialogContent>
-              <DialogActions>
-                <Button appearance="primary" onClick={handleSubmit}>{t.providers.save}</Button>
-                <Button onClick={() => setOpen(false)}>{t.providers.cancel}</Button>
-              </DialogActions>
-            </DialogBody>
-          </DialogSurface>
-        </Dialog>
-      </div>
+    <Box>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" sx={{ fontWeight: 600 }}>{t.providers.title}</Typography>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>
+          {t.providers.addProvider}
+        </Button>
+      </Box>
 
-      {loading && <Spinner label={t.common.loading} />}
+      {loading && <CircularProgress sx={{ display: 'block', mx: 'auto', my: 4 }} />}
       {error && (
-        <Badge appearance="filled" color="danger" style={{ marginBottom: '12px', display: 'block' }}>
-          {t.common.error}: {error}
-        </Badge>
+        <Alert severity="error" sx={{ mb: 2 }}>{t.common.error}: {error}</Alert>
       )}
 
-      <Card className={styles.card}>
+      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{t.providers.addProvider}</DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+          <TextField
+            label={t.providers.name}
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder={t.providers.placeholderName}
+            fullWidth
+          />
+          <FormControl fullWidth>
+            <InputLabel>{t.providers.type}</InputLabel>
+            <Select
+              value={form.prov_type}
+              label={t.providers.type}
+              onChange={(e) => setForm({ ...form, prov_type: e.target.value })}
+            >
+              {PROV_TYPES.map((pt) => (
+                <MenuItem key={pt} value={pt}>{pt}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            label={t.providers.baseUrl}
+            value={form.base_url}
+            onChange={(e) => setForm({ ...form, base_url: e.target.value })}
+            placeholder={t.providers.placeholderUrl}
+            fullWidth
+          />
+          <TextField
+            label={t.providers.apiKey}
+            type="password"
+            value={form.api_key}
+            onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+            fullWidth
+          />
+          <TextField
+            label={t.providers.extraHeaders}
+            value={form.extra_headers || ''}
+            onChange={(e) => setForm({ ...form, extra_headers: e.target.value })}
+            placeholder={t.providers.placeholderHeaders}
+            fullWidth
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpen(false)}>{t.providers.cancel}</Button>
+          <Button variant="contained" onClick={handleSubmit}>{t.providers.save}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Card variant="outlined">
         <Table>
-          <TableHeader>
+          <TableHead>
             <TableRow>
-              <TableHeaderCell>{t.providers.name}</TableHeaderCell>
-              <TableHeaderCell>{t.providers.type}</TableHeaderCell>
-              <TableHeaderCell>{t.providers.baseUrl}</TableHeaderCell>
-              <TableHeaderCell>{t.providers.apiKey}</TableHeaderCell>
-              <TableHeaderCell>{t.providers.actions}</TableHeaderCell>
+              <TableCell>{t.providers.name}</TableCell>
+              <TableCell>{t.providers.type}</TableCell>
+              <TableCell>{t.providers.baseUrl}</TableCell>
+              <TableCell>{t.providers.apiKey}</TableCell>
+              <TableCell align="right">{t.providers.actions}</TableCell>
             </TableRow>
-          </TableHeader>
+          </TableHead>
           <TableBody>
             {providers.map((p) => (
-              <TableRow key={p.id} className={styles.tableRow}>
-                <TableCell><b>{p.name}</b></TableCell>
+              <TableRow key={p.id} hover>
+                <TableCell sx={{ fontWeight: 600 }}>{p.name}</TableCell>
                 <TableCell>
-                  <Badge appearance="outline" color="brand">{p.prov_type}</Badge>
+                  <Chip size="small" variant="outlined" label={p.prov_type} />
                 </TableCell>
-                <TableCell style={{ fontFamily: 'monospace', fontSize: '12px' }}>{p.base_url}</TableCell>
-                <TableCell style={{ fontFamily: 'monospace' }}>{p.api_key}</TableCell>
-                <TableCell>
-                  <Button icon={<Delete24Regular />} appearance="subtle" onClick={() => deleteProvider(p.id)} />
+                <TableCell sx={{ fontFamily: 'monospace', fontSize: '12px' }}>{p.base_url}</TableCell>
+                <TableCell sx={{ fontFamily: 'monospace' }}>{p.api_key}</TableCell>
+                <TableCell align="right">
+                  <IconButton size="small" color="error" onClick={() => deleteProvider(p.id)}>
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
                 </TableCell>
               </TableRow>
             ))}
             {providers.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5}>
-                  <div className={styles.empty}>{t.dashboard.noData}</div>
+                <TableCell colSpan={5} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                  {t.dashboard.noData}
                 </TableCell>
               </TableRow>
             )}
           </TableBody>
         </Table>
       </Card>
-    </div>
+    </Box>
   );
 }

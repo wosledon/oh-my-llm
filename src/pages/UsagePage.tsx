@@ -1,23 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
-import {
-  Card,
-  CardHeader,
-  CardPreview,
-  Table,
-  TableHeader,
-  TableRow,
-  TableHeaderCell,
-  TableBody,
-  TableCell,
-  Text,
-  makeStyles,
-  tokens,
-  Spinner,
-  Button,
-} from '@fluentui/react-components';
-import {
-  Calendar24Regular,
-} from '@fluentui/react-icons';
+import Typography from '@mui/material/Typography';
+import Table from '@mui/material/Table';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+import TableCell from '@mui/material/TableCell';
+import TableBody from '@mui/material/TableBody';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import CircularProgress from '@mui/material/CircularProgress';
+import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import { useI18n } from '../i18n';
 
 interface DailyUsage {
@@ -37,50 +30,8 @@ interface UsageSummary {
   total_cost: number;
 }
 
-const useStyles = makeStyles({
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-    padding: tokens.spacingHorizontalL,
-  },
-  statsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-    gap: tokens.spacingHorizontalM,
-  },
-  statCard: {
-    padding: tokens.spacingHorizontalM,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  statValue: {
-    fontSize: '24px',
-    fontWeight: '600',
-    color: tokens.colorBrandForeground1,
-  },
-  statLabel: {
-    fontSize: '12px',
-    color: tokens.colorNeutralForeground2,
-  },
-  toolbar: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalM,
-    alignItems: 'center',
-  },
-  dateInput: {
-    padding: '6px 10px',
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground1,
-  },
-});
-
 export default function UsagePage() {
   const { t } = useI18n();
-  const styles = useStyles();
 
   const today = new Date().toISOString().split('T')[0];
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
@@ -119,85 +70,115 @@ export default function UsagePage() {
   }, [fetchUsage]);
 
   return (
-    <div className={styles.container}>
-      <Card>
-        <CardHeader
-          header={<Text weight="semibold" size={500}>{t.usage.title}</Text>}
-        />
-        <CardPreview>
-          <div style={{ padding: '16px' }}>
-            <div className={styles.toolbar} style={{ marginBottom: '16px' }}>
-              <Calendar24Regular />
-              <input
-                type="date"
-                className={styles.dateInput}
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-              <Text>-&#124;-</Text>
-              <input
-                type="date"
-                className={styles.dateInput}
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-              <Button appearance="primary" onClick={fetchUsage}>{t.common.confirm}</Button>
-            </div>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Card variant="outlined">
+        <CardContent>
+          <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>{t.usage.title}</Typography>
 
-            <div className={styles.statsGrid}>
-              <Card className={styles.statCard}>
-                <Text className={styles.statValue}>{summary.total_requests}</Text>
-                <Text className={styles.statLabel}>{t.usage.totalRequests}</Text>
-              </Card>
-              <Card className={styles.statCard}>
-                <Text className={styles.statValue}>{summary.total_prompt_tokens.toLocaleString()}</Text>
-                <Text className={styles.statLabel}>{t.usage.totalPromptTokens}</Text>
-              </Card>
-              <Card className={styles.statCard}>
-                <Text className={styles.statValue}>{summary.total_completion_tokens.toLocaleString()}</Text>
-                <Text className={styles.statLabel}>{t.usage.totalCompletionTokens}</Text>
-              </Card>
-              <Card className={styles.statCard}>
-                <Text className={styles.statValue}>${summary.total_cost.toFixed(4)}</Text>
-                <Text className={styles.statLabel}>{t.usage.totalCost}</Text>
-              </Card>
-            </div>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap', mb: 3 }}>
+            <CalendarTodayIcon sx={{ color: 'text.secondary' }} />
+            <Box
+              component="input"
+              type="date"
+              value={startDate}
+              onChange={(e: any) => setStartDate(e.target.value)}
+              sx={{
+                px: 1.5,
+                py: 1,
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+                color: 'text.primary',
+                fontFamily: 'inherit',
+              }}
+            />
+            <Typography color="text.secondary">-</Typography>
+            <Box
+              component="input"
+              type="date"
+              value={endDate}
+              onChange={(e: any) => setEndDate(e.target.value)}
+              sx={{
+                px: 1.5,
+                py: 1,
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+                color: 'text.primary',
+                fontFamily: 'inherit',
+              }}
+            />
+            <Button variant="contained" onClick={fetchUsage}>{t.common.confirm}</Button>
+          </Box>
 
-            <Text weight="semibold" size={400} style={{ marginTop: '24px', marginBottom: '12px' }}>
-              {t.usage.dailyBreakdown}
-            </Text>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+              gap: 2,
+              mb: 3,
+            }}
+          >
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{summary.total_requests}</Typography>
+                <Typography variant="caption" color="text.secondary">{t.usage.totalRequests}</Typography>
+              </CardContent>
+            </Card>
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{summary.total_prompt_tokens.toLocaleString()}</Typography>
+                <Typography variant="caption" color="text.secondary">{t.usage.totalPromptTokens}</Typography>
+              </CardContent>
+            </Card>
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>{summary.total_completion_tokens.toLocaleString()}</Typography>
+                <Typography variant="caption" color="text.secondary">{t.usage.totalCompletionTokens}</Typography>
+              </CardContent>
+            </Card>
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="h4" sx={{ fontWeight: 700, color: 'primary.main' }}>${summary.total_cost.toFixed(4)}</Typography>
+                <Typography variant="caption" color="text.secondary">{t.usage.totalCost}</Typography>
+              </CardContent>
+            </Card>
+          </Box>
 
-            {loading ? (
-              <Spinner style={{ margin: '40px auto', display: 'block' }} />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHeaderCell>{t.usage.dateRange}</TableHeaderCell>
-                    <TableHeaderCell>{t.usage.model}</TableHeaderCell>
-                    <TableHeaderCell>{t.usage.requestCount}</TableHeaderCell>
-                    <TableHeaderCell>{t.usage.promptTokens}</TableHeaderCell>
-                    <TableHeaderCell>{t.usage.completionTokens}</TableHeaderCell>
-                    <TableHeaderCell>{t.usage.cost}</TableHeaderCell>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>{t.usage.dailyBreakdown}</Typography>
+
+          {loading ? (
+            <CircularProgress sx={{ display: 'block', mx: 'auto', my: 4 }} />
+          ) : (
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>{t.usage.dateRange}</TableCell>
+                  <TableCell>{t.usage.model}</TableCell>
+                  <TableCell>{t.usage.requestCount}</TableCell>
+                  <TableCell>{t.usage.promptTokens}</TableCell>
+                  <TableCell>{t.usage.completionTokens}</TableCell>
+                  <TableCell>{t.usage.cost}</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {daily.map((item, idx) => (
+                  <TableRow key={idx} hover>
+                    <TableCell>{item.date}</TableCell>
+                    <TableCell>{item.model}</TableCell>
+                    <TableCell>{item.request_count}</TableCell>
+                    <TableCell>{item.prompt_tokens.toLocaleString()}</TableCell>
+                    <TableCell>{item.completion_tokens.toLocaleString()}</TableCell>
+                    <TableCell>${item.cost.toFixed(4)}</TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {daily.map((item, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell>{item.date}</TableCell>
-                      <TableCell>{item.model}</TableCell>
-                      <TableCell>{item.request_count}</TableCell>
-                      <TableCell>{item.prompt_tokens.toLocaleString()}</TableCell>
-                      <TableCell>{item.completion_tokens.toLocaleString()}</TableCell>
-                      <TableCell>${item.cost.toFixed(4)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </div>
-        </CardPreview>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
       </Card>
-    </div>
+    </Box>
   );
 }
