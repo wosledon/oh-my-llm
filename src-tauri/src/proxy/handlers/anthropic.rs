@@ -183,6 +183,7 @@ pub async fn handle_anthropic_messages(
                     let mut buffer = String::new();
                     let mut sent_start = false;
                     let mut id = String::new();
+                    let mut think_filter = crate::proxy::handlers::openai::ThinkFilter::new();
 
                     while let Some(chunk) = stream.next().await {
                         match chunk {
@@ -263,11 +264,13 @@ pub async fn handle_anthropic_messages(
                                                                 .get("content")
                                                                 .and_then(|c| c.as_str())
                                                             {
-                                                                if !content.is_empty() {
+                                                                let (_reasoning, visible) =
+                                                                    think_filter.process(content);
+                                                                if !visible.is_empty() {
                                                                     let delta = serde_json::json!({
                                                                         "type": "content_block_delta",
                                                                         "index": 0,
-                                                                        "delta": { "type": "text_delta", "text": content }
+                                                                        "delta": { "type": "text_delta", "text": visible }
                                                                     });
                                                                     let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_delta\ndata: {}\n\n", delta)))).await;
                                                                 }
@@ -337,8 +340,10 @@ pub async fn handle_anthropic_messages(
                 }
             };
 
+            let body_str = String::from_utf8_lossy(&body_bytes);
+            let filtered_body = crate::proxy::handlers::openai::strip_think_tags(&body_str);
             let openai_resp: crate::protocol::openai_types::ChatCompletionResponse =
-                match serde_json::from_slice(&body_bytes) {
+                match serde_json::from_str(&filtered_body) {
                     Ok(r) => r,
                     Err(_) => {
                         return build_error_response(

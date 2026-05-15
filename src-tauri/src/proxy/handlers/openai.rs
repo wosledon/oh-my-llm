@@ -19,7 +19,7 @@ const THINK_END: &str = "</think>";
 const THINK_START_LEN: usize = 7;
 const THINK_END_LEN: usize = 8;
 
-struct ThinkFilter {
+pub struct ThinkFilter {
     pending: String,
     /// State machine:
     ///   false  → still looking for `<think>` at the head of the response
@@ -38,7 +38,7 @@ struct ThinkFilter {
 }
 
 impl ThinkFilter {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             pending: String::new(),
             in_think: false,
@@ -67,7 +67,7 @@ impl ThinkFilter {
 
     /// Process incoming text and return (reasoning_content, visible_content).
     /// After the first `</think>` is seen the filter becomes a no-op.
-    fn process(&mut self, text: &str) -> (String, String) {
+    pub fn process(&mut self, text: &str) -> (String, String) {
         if self.done {
             self.output_chars += text.chars().count();
             return (String::new(), text.to_string());
@@ -352,7 +352,7 @@ fn char_boundary(s: &str, byte_idx: usize) -> usize {
 }
 
 /// Strip `<think>...</think>` from non-stream JSON response and move it to `reasoning_content`.
-fn strip_think_tags(body: &str) -> String {
+pub fn strip_think_tags(body: &str) -> String {
     // Fast path: no think tags at all
     if !body.contains(THINK_START) {
         return body.to_string();

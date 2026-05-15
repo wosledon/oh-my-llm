@@ -176,12 +176,21 @@ pub fn openai_to_anthropic_response(resp: ChatCompletionResponse) -> AnthropicRe
     });
 
     let text_content = extract_text(&choice.message.content).unwrap_or_default();
+    let reasoning_content = choice.message.reasoning_content.unwrap_or_default();
 
-    let content = if text_content.is_empty() {
-        vec![]
-    } else {
-        vec![crate::protocol::anthropic_types::AnthropicContent::Text { text: text_content }]
-    };
+    let mut content: Vec<crate::protocol::anthropic_types::AnthropicContent> = Vec::new();
+    if !reasoning_content.is_empty() {
+        content.push(
+            crate::protocol::anthropic_types::AnthropicContent::Thinking {
+                thinking: reasoning_content,
+                signature: String::new(),
+            },
+        );
+    }
+    if !text_content.is_empty() {
+        content
+            .push(crate::protocol::anthropic_types::AnthropicContent::Text { text: text_content });
+    }
 
     let usage = resp.usage.unwrap_or(Usage {
         prompt_tokens: 0,
