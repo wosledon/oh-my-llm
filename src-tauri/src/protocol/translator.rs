@@ -83,6 +83,46 @@ pub fn openai_to_anthropic(req: ChatCompletionRequest) -> AnthropicRequest {
 
     let max_tokens = req.max_completion_tokens.or(req.max_tokens).unwrap_or(4096);
 
+    let tools = req.tools.map(|openai_tools| {
+        openai_tools
+            .into_iter()
+            .map(
+                |t| crate::protocol::anthropic_types::AnthropicToolDefinition {
+                    name: t.function.name,
+                    description: t.function.description,
+                    input_schema: t.function.parameters,
+                },
+            )
+            .collect()
+    });
+
+    let tool_choice = req.tool_choice.and_then(|tc| {
+        if let Some(s) = tc.as_str() {
+            match s {
+                "auto" => Some(serde_json::json!({"type": "auto"})),
+                "none" => Some(serde_json::json!({"type": "none"})),
+                "required" => Some(serde_json::json!({"type": "any"})),
+                _ => Some(serde_json::json!({"type": "auto"})),
+            }
+        } else if let Ok(obj) =
+            serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(tc.clone())
+        {
+            if obj.get("type").and_then(|v| v.as_str()) == Some("function") {
+                let name = obj
+                    .get("function")
+                    .and_then(|f| f.as_object())
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                Some(serde_json::json!({"type": "tool", "name": name}))
+            } else {
+                Some(tc)
+            }
+        } else {
+            Some(tc)
+        }
+    });
+
     AnthropicRequest {
         model: req.model,
         max_tokens,
@@ -94,6 +134,8 @@ pub fn openai_to_anthropic(req: ChatCompletionRequest) -> AnthropicRequest {
         stop_sequences: req.stop,
         stream: req.stream,
         metadata: None,
+        tools,
+        tool_choice,
     }
 }
 
@@ -282,6 +324,36 @@ pub fn anthropic_to_openai_request(req: AnthropicRequest) -> ChatCompletionReque
         }
     }
 
+    let tools = req.tools.map(|anthropic_tools| {
+        anthropic_tools
+            .into_iter()
+            .map(|t| crate::protocol::openai_types::ToolDefinition {
+                tool_type: "function".to_string(),
+                function: crate::protocol::openai_types::ToolFunction {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.input_schema,
+                },
+            })
+            .collect()
+    });
+
+    let tool_choice = req.tool_choice.and_then(|tc| {
+        tc.get("type").and_then(|v| v.as_str()).map(|t| match t {
+            "auto" => serde_json::Value::String("auto".to_string()),
+            "any" => serde_json::Value::String("required".to_string()),
+            "none" => serde_json::Value::String("none".to_string()),
+            "tool" => {
+                let name = tc.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                serde_json::json!({
+                    "type": "function",
+                    "function": { "name": name }
+                })
+            }
+            _ => serde_json::Value::String("auto".to_string()),
+        })
+    });
+
     ChatCompletionRequest {
         model: req.model,
         messages,
@@ -296,8 +368,8 @@ pub fn anthropic_to_openai_request(req: AnthropicRequest) -> ChatCompletionReque
         frequency_penalty: None,
         logit_bias: None,
         user: None,
-        tools: None,
-        tool_choice: None,
+        tools,
+        tool_choice,
         response_format: None,
     }
 }

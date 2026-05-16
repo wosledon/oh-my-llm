@@ -110,7 +110,7 @@ export default function Dashboard() {
   const [copiedAnthropic, setCopiedAnthropic] = useState(false);
 
   const openaiAddress = config ? `http://127.0.0.1:${config.port}/v1` : '';
-  const anthropicAddress = config ? `http://127.0.0.1:${config.port}/v1/messages` : '';
+  const anthropicAddress = config ? `http://127.0.0.1:${config.port}` : '';
 
   const handleCopyOpenAI = async () => {
     if (!openaiAddress) return;
