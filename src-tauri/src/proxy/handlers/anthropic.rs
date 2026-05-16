@@ -204,9 +204,12 @@ pub async fn handle_anthropic_messages(
                     let mut sent_start = false;
                     let mut id = String::new();
                     let mut think_filter = crate::proxy::handlers::openai::ThinkFilter::new();
-                    let mut pending_tool_calls: Vec<crate::protocol::openai_types::ToolCall> =
-                        Vec::new();
                     let mut tool_call_block_index: usize = 1; // text block is index 0
+
+                    // OpenAI SSE tool_calls delta uses `index` (not `id`) to identify
+                    // which tool call a fragment belongs to.  We keep a temporary vec
+                    // indexed by that `index` while we accumulate arguments.
+                    let mut tc_acc: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
 
                     while let Some(chunk) = stream.next().await {
                         match chunk {
@@ -300,21 +303,54 @@ pub async fn handle_anthropic_messages(
                                                                 }
                                                             }
 
-                                                            // tool_calls delta — accumulate
+                                                            // tool_calls delta — accumulate by `index`
                                                             if let Some(tc_array) = delta_obj
                                                                 .get("tool_calls")
                                                                 .and_then(|c| c.as_array())
                                                             {
                                                                 for tc in tc_array {
-                                                                    if let Ok(tool_call) = serde_json::from_value::<crate::protocol::openai_types::ToolCall>(tc.clone()) {
-                                                                        if let Some(existing) = pending_tool_calls.iter_mut().find(|t| t.id == tool_call.id) {
-                                                                            if !tool_call.function.name.is_empty() {
-                                                                                existing.function.name = tool_call.function.name.clone();
-                                                                            }
-                                                                            existing.function.arguments.push_str(&tool_call.function.arguments);
-                                                                        } else {
-                                                                            pending_tool_calls.push(tool_call);
-                                                                        }
+                                                                    let idx = tc
+                                                                        .get("index")
+                                                                        .and_then(|v| v.as_u64())
+                                                                        .unwrap_or(0)
+                                                                        as usize;
+                                                                    if tc_acc.len() <= idx {
+                                                                        tc_acc.resize(
+                                                                            idx + 1,
+                                                                            (
+                                                                                String::new(),
+                                                                                String::new(),
+                                                                                String::new(),
+                                                                            ),
+                                                                        );
+                                                                    }
+                                                                    let (
+                                                                        id_ref,
+                                                                        name_ref,
+                                                                        args_ref,
+                                                                    ) = &mut tc_acc[idx];
+                                                                    if let Some(id) = tc
+                                                                        .get("id")
+                                                                        .and_then(|v| v.as_str())
+                                                                    {
+                                                                        *id_ref = id.to_string();
+                                                                    }
+                                                                    if let Some(name) = tc
+                                                                        .get("function")
+                                                                        .and_then(|f| f.get("name"))
+                                                                        .and_then(|v| v.as_str())
+                                                                    {
+                                                                        *name_ref =
+                                                                            name.to_string();
+                                                                    }
+                                                                    if let Some(args) = tc
+                                                                        .get("function")
+                                                                        .and_then(|f| {
+                                                                            f.get("arguments")
+                                                                        })
+                                                                        .and_then(|v| v.as_str())
+                                                                    {
+                                                                        args_ref.push_str(args);
                                                                     }
                                                                 }
                                                             }
@@ -329,18 +365,25 @@ pub async fn handle_anthropic_messages(
                                                             let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_stop\ndata: {}\n\n", block_stop)))).await;
 
                                                             // emit accumulated tool_calls as tool_use blocks
-                                                            for call in &pending_tool_calls {
-                                                                let _input = serde_json::from_str(
-                                                                    &call.function.arguments,
-                                                                )
-                                                                .unwrap_or(serde_json::Value::Null);
+                                                            for (tc_id, tc_name, tc_args) in &tc_acc
+                                                            {
+                                                                if tc_id.is_empty()
+                                                                    || tc_name.is_empty()
+                                                                {
+                                                                    continue;
+                                                                }
+                                                                let _input =
+                                                                    serde_json::from_str(tc_args)
+                                                                        .unwrap_or(
+                                                                            serde_json::Value::Null,
+                                                                        );
                                                                 let t_start = serde_json::json!({
                                                                     "type": "content_block_start",
                                                                     "index": tool_call_block_index,
                                                                     "content_block": {
                                                                         "type": "tool_use",
-                                                                        "id": call.id,
-                                                                        "name": call.function.name,
+                                                                        "id": tc_id,
+                                                                        "name": tc_name,
                                                                         "input": {}
                                                                     }
                                                                 });
@@ -350,7 +393,7 @@ pub async fn handle_anthropic_messages(
                                                                     "index": tool_call_block_index,
                                                                     "delta": {
                                                                         "type": "input_json_delta",
-                                                                        "partial_json": call.function.arguments
+                                                                        "partial_json": tc_args
                                                                     }
                                                                 });
                                                                 let _ = tx.send(Ok(bytes::Bytes::from(format!("event: content_block_delta\ndata: {}\n\n", t_delta)))).await;

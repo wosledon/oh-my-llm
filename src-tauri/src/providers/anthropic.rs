@@ -88,6 +88,9 @@ impl ProviderClient for AnthropicClient {
                 let mut stream = resp.bytes_stream();
                 let mut buffer = String::new();
                 let mut sent_role = false;
+                let mut current_block_is_tool = false;
+                let mut current_tool_index: usize = 0;
+                let mut tool_use_acc: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
 
                 loop {
                     let got_chunk = match stream.next().await {
@@ -141,10 +144,41 @@ impl ProviderClient for AnthropicClient {
                                         sent_role = true;
                                     }
                                 }
+                                "content_block_start" => {
+                                    if let Ok(json) =
+                                        serde_json::from_str::<serde_json::Value>(&data)
+                                    {
+                                        if let Some(block_type) = json
+                                            .get("content_block")
+                                            .and_then(|b| b.get("type"))
+                                            .and_then(|t| t.as_str())
+                                        {
+                                            current_block_is_tool = block_type == "tool_use";
+                                            if current_block_is_tool {
+                                                let tc_id = json
+                                                    .get("content_block")
+                                                    .and_then(|b| b.get("id"))
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("")
+                                                    .to_string();
+                                                let tc_name = json
+                                                    .get("content_block")
+                                                    .and_then(|b| b.get("name"))
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("")
+                                                    .to_string();
+                                                tool_use_acc.push((tc_id, tc_name, String::new()));
+                                                current_tool_index =
+                                                    tool_use_acc.len().saturating_sub(1);
+                                            }
+                                        }
+                                    }
+                                }
                                 "content_block_delta" => {
                                     if let Ok(json) =
                                         serde_json::from_str::<serde_json::Value>(&data)
                                     {
+                                        // text_delta
                                         if let Some(text) = json
                                             .get("delta")
                                             .and_then(|d| d.get("text"))
@@ -165,6 +199,41 @@ impl ProviderClient for AnthropicClient {
                                                 .await;
                                             sent_role = true;
                                         }
+                                        // input_json_delta (tool_use)
+                                        if current_block_is_tool {
+                                            if let Some(partial) = json
+                                                .get("delta")
+                                                .and_then(|d| d.get("partial_json"))
+                                                .and_then(|v| v.as_str())
+                                            {
+                                                if let Some(entry) =
+                                                    tool_use_acc.get_mut(current_tool_index)
+                                                {
+                                                    entry.2.push_str(partial);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                "content_block_stop" => {
+                                    if current_block_is_tool {
+                                        if let Some((tc_id, tc_name, tc_args)) = tool_use_acc.pop()
+                                        {
+                                            let chunk = serde_json::json!({
+                                                "id": id,
+                                                "object": "chat.completion.chunk",
+                                                "created": created,
+                                                "model": model,
+                                                "choices": [{"index":0,"delta":{"tool_calls":[{"index":current_tool_index,"id":tc_id,"type":"function","function":{"name":tc_name,"arguments":tc_args}}]},"finish_reason":null}]
+                                            });
+                                            let _ = tx
+                                                .send(Ok(bytes::Bytes::from(format!(
+                                                    "data: {}\n\n",
+                                                    chunk
+                                                ))))
+                                                .await;
+                                        }
+                                        current_block_is_tool = false;
                                     }
                                 }
                                 "message_delta" => {
