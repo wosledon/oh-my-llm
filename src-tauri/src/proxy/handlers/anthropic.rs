@@ -25,15 +25,24 @@ pub async fn handle_anthropic_messages(
         }
     };
 
-    let mut request: AnthropicRequest = match serde_json::from_slice(&bytes) {
+    // Parse as raw JSON first so we can forward the *original* body untouched
+    // for the Anthropic native passthrough path (preserves unknown fields like tools).
+    let mut request_json: serde_json::Value = match serde_json::from_slice(&bytes) {
         Ok(r) => r,
         Err(e) => {
             return build_error_response(StatusCode::BAD_REQUEST, &format!("Invalid JSON: {}", e));
         }
     };
 
-    let original_model = request.model.clone();
-    let is_stream = request.stream.unwrap_or(false);
+    let original_model = request_json
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let is_stream = request_json
+        .get("stream")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let db_guard = state.db.lock().await;
     let config = match crate::storage::config_repo::get_proxy_config(&db_guard) {
@@ -50,7 +59,7 @@ pub async fn handle_anthropic_messages(
     let ctx = if let Some(shadow_id) = &config.shadow_mapping_id {
         match resolve_shadow_route(&db_guard, shadow_id) {
             Ok(c) => {
-                request.model = c.upstream_model.clone();
+                request_json["model"] = serde_json::Value::String(c.upstream_model.clone());
                 c
             }
             Err(e) => {
@@ -118,7 +127,7 @@ pub async fn handle_anthropic_messages(
         let resp = match client
             .post(&url)
             .headers(headers)
-            .json(&request)
+            .json(&request_json)
             .send()
             .await
         {
@@ -160,6 +169,17 @@ pub async fn handle_anthropic_messages(
     }
 
     // For OpenAI / OpenAI-compatible upstream: translate Anthropic -> OpenAI, send, then translate back
+    // Deserialize into typed struct only for the translation path.
+    let request: AnthropicRequest = match serde_json::from_value(request_json) {
+        Ok(r) => r,
+        Err(e) => {
+            return build_error_response(
+                StatusCode::BAD_REQUEST,
+                &format!("Invalid Anthropic request: {}", e),
+            );
+        }
+    };
+
     let openai_req = anthropic_to_openai_request(request);
     let client = match crate::proxy::router::select_client(&state, &prov_type) {
         Ok(c) => c,
